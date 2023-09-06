@@ -258,6 +258,11 @@ struct hab_message {
 	uint32_t data[];
 };
 
+struct hab_forbidden_node {
+	struct list_head node;
+	uint32_t mmid;
+};
+
 /* for all the pchans of same kind */
 struct hab_device {
 	char name[MAX_VMID_NAME_SIZE];
@@ -294,6 +299,9 @@ struct uhab_context {
 
 	struct list_head pending_open; /* sent to remote */
 	int pending_cnt;
+
+	struct list_head forbidden_chans;
+	spinlock_t forbidden_lock;
 
 	rwlock_t ctx_lock;
 	int closing;
@@ -411,6 +419,9 @@ struct export_desc_super {
 	struct export_desc  exp;
 };
 
+int hab_is_forbidden(struct uhab_context *ctx,
+		struct hab_device *dev,
+		uint32_t sub_id);
 int hab_vchan_open(struct uhab_context *ctx,
 		unsigned int mmid, int32_t *vcid,
 		int32_t timeout, uint32_t flags);

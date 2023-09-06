@@ -86,6 +86,9 @@ struct uhab_context *hab_ctx_alloc(int kernel)
 	rwlock_init(&ctx->exp_lock);
 	rwlock_init(&ctx->ctx_lock);
 
+	INIT_LIST_HEAD(&ctx->forbidden_chans);
+	spin_lock_init(&ctx->forbidden_lock);
+
 	INIT_LIST_HEAD(&ctx->pending_open);
 	kref_init(&ctx->refcount);
 	ctx->import_ctx = habmem_imp_hyp_open();
@@ -120,6 +123,17 @@ void hab_ctx_free(struct kref *ref)
 	struct uhab_context *ctxdel, *ctxtmp;
 	struct hab_open_node *open_node;
 	struct export_desc *exp = NULL, *exp_tmp = NULL;
+	struct hab_forbidden_node *forbidden = NULL, *forbidden_tmp = NULL;
+
+	spin_lock_bh(&ctx->forbidden_lock);
+	list_for_each_entry_safe(forbidden, forbidden_tmp,
+							&ctx->forbidden_chans, node) {
+		list_del(&forbidden->node);
+		pr_debug("Remove mmid 0x%x from forbidden list, ctx %p\n",
+				forbidden->mmid, ctx);
+		kfree(forbidden);
+	}
+	spin_unlock_bh(&ctx->forbidden_lock);
 
 	/* garbage-collect exp/imp buffers */
 	write_lock_bh(&ctx->exp_lock);
@@ -346,7 +360,7 @@ struct virtual_channel *frontend_open(struct uhab_context *ctx,
 				   vchan->id);
 		hab_open_pending_exit(ctx, pchan, &pending_open);
 
-		if (ret != -EINTR)
+		if (ret != -EINTR && ret != -ENXIO)
 			ret = -EINVAL;
 		goto err;
 	}
@@ -417,6 +431,8 @@ struct virtual_channel *backend_listen(struct uhab_context *ctx,
 				ret = -EINVAL;
 			if (-EAGAIN == ret) {
 				ret = -ETIMEDOUT;
+			} else if (-ENXIO == ret) {
+				pr_debug("open request canceling\n");
 			} else {
 				/* device is closed */
 				pr_err("open request wait failed ctx closing %d\n",
@@ -499,7 +515,10 @@ struct virtual_channel *backend_listen(struct uhab_context *ctx,
 
 			ret = -ENODEV; /* open request cancelled remotely */
 			break;
-		} else if (ret != -EAGAIN) {
+		} else if (ret == -ENXIO) {
+			pr_warn("backend mmid %d listen canceling\n", mm_id);
+			goto err;
+		}else if (ret != -EAGAIN) {
 			hab_open_pending_exit(ctx, pchan, &pending_open);
 			break; /* received something. good case! */
 		}
@@ -535,7 +554,7 @@ struct virtual_channel *backend_listen(struct uhab_context *ctx,
 	hab_pchan_put(pchan);
 	return vchan;
 err:
-	if (ret != -ETIMEDOUT)
+	if ((ret != -ETIMEDOUT) && (ret != -ENXIO))
 		pr_err("listen on mmid %d failed\n", mm_id);
 	if (vchan)
 		hab_vchan_put(vchan);
@@ -685,6 +704,67 @@ bool hab_is_loopback(void)
 	return hab_driver.b_loopback;
 }
 
+static int hab_stop(struct uhab_context *ctx, unsigned int mmid)
+{
+	struct hab_forbidden_node *node = NULL, *tmp = NULL;
+	struct hab_device *dev = NULL;
+
+	dev = find_hab_device(mmid);
+	if (!dev) {
+		pr_err("failed to find dev based on id 0x%x\n", mmid);
+		return -EINVAL;
+	}
+
+	spin_lock_bh(&ctx->forbidden_lock);
+	list_for_each_entry_safe(node, tmp, &ctx->forbidden_chans, node) {
+		if (node->mmid == mmid) {
+			pr_info("mmid 0x%x has been in forbidden list, ctx %p\n",
+				mmid, ctx);
+			spin_unlock_bh(&ctx->forbidden_lock);
+			return 0;
+		}
+	}
+
+	pr_info("Add mmid 0x%x into forbidden list, ctx %p\n",
+		mmid, ctx);
+
+	node = kzalloc(sizeof(*node), GFP_ATOMIC);
+	if (!node) {
+		spin_unlock_bh(&ctx->forbidden_lock);
+		return -ENOMEM;
+	}
+
+	node->mmid = mmid;
+	list_add_tail(&node->node, &ctx->forbidden_chans);
+
+	spin_unlock_bh(&ctx->forbidden_lock);
+
+	wake_up_interruptible(&dev->openq);
+
+	return 0;
+}
+int hab_is_forbidden(struct uhab_context *ctx,
+		struct hab_device *dev,
+		uint32_t sub_id)
+{
+	struct hab_forbidden_node *node = NULL, *tmp = NULL;
+
+	if (!dev)
+		return 0;
+
+	spin_lock_bh(&ctx->forbidden_lock);
+	list_for_each_entry_safe(node, tmp, &ctx->forbidden_chans, node) {
+		if ((HAB_MMID_GET_MAJOR(node->mmid) == dev->id) &&
+				(HAB_MMID_GET_MINOR(node->mmid) == sub_id)) {
+			spin_unlock_bh(&ctx->forbidden_lock);
+			return 1;
+		}
+	}
+	spin_unlock_bh(&ctx->forbidden_lock);
+
+	return 0;
+}
+
 int hab_vchan_open(struct uhab_context *ctx,
 		unsigned int mmid,
 		int32_t *vcid,
@@ -707,6 +787,13 @@ int hab_vchan_open(struct uhab_context *ctx,
 			vchan = frontend_open(ctx, mmid, LOOPBACK_DOM);
 	} else {
 		dev = find_hab_device(mmid);
+
+		if (hab_is_forbidden(ctx,
+				dev, HAB_MMID_GET_MINOR(mmid))) {
+			pr_warn("mmid 0x%x has been forbidden",
+				mmid);
+			return -ENXIO;
+		}
 
 		if (dev) {
 			struct physical_channel *pchan =
@@ -731,7 +818,8 @@ int hab_vchan_open(struct uhab_context *ctx,
 	}
 
 	if (IS_ERR(vchan)) {
-		if (-ETIMEDOUT != PTR_ERR(vchan) && -EAGAIN != PTR_ERR(vchan))
+		if (-ETIMEDOUT != PTR_ERR(vchan) && -EAGAIN != PTR_ERR(vchan)
+			&& -ENXIO != PTR_ERR(vchan))
 			pr_err("vchan open failed mmid=%d\n", mmid);
 		return PTR_ERR(vchan);
 	}
@@ -796,8 +884,12 @@ int hab_vchan_close(struct uhab_context *ctx, int32_t vcid)
 	}
 	write_unlock(&ctx->ctx_lock);
 
-	if (!vchan_found)
-		ret = -ENODEV;
+	if (!vchan_found) {
+		ret = hab_stop(ctx, vcid);
+
+		if (ret == -EINVAL)
+			ret = -ENODEV; /* invalid vcid or MMID */
+	}
 
 	return ret;
 }
