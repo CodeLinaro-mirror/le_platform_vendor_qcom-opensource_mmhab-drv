@@ -254,7 +254,7 @@ static int vhost_hab_open(struct inode *inode, struct file *f)
 	int i, j = 0;
 	int ret;
 
-	vh_dev = kmalloc(sizeof(*vh_dev), GFP_KERNEL);
+	vh_dev = kzalloc(sizeof(*vh_dev), GFP_KERNEL);
 	if (!vh_dev)
 		return -ENOMEM;
 
