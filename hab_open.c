@@ -121,6 +121,10 @@ static int hab_open_request_find(struct uhab_context *ctx,
 
 done:
 	spin_unlock_bh(&dev->openlock);
+
+	if (hab_is_forbidden(ctx, dev, listen->xdata.sub_id))
+		ret = 1;
+
 	return ret;
 }
 
@@ -148,7 +152,7 @@ int hab_open_listen(struct uhab_context *ctx,
 	}
 
 	*recv_request = NULL;
-	if (ms_timeout > 0) { /* be case */
+	if (ms_timeout > 0) { /* be timeout case */
 		ms_timeout = msecs_to_jiffies(ms_timeout);
 		ret = wait_event_interruptible_timeout(dev->openq,
 			hab_open_request_find(ctx, dev, listen, recv_request),
@@ -160,9 +164,12 @@ int hab_open_listen(struct uhab_context *ctx,
 			pr_warn("something failed in open listen ret %d\n",
 					ret);
 			ret = -EINTR; /* condition not met */
+		} else if (hab_is_forbidden(ctx, dev, listen->xdata.sub_id)) {
+			pr_info("local open cancelled ret %d\n", ret);
+			ret = -ENXIO;
 		} else if (ret > 0)
 			ret = 0; /* condition met */
-	} else { /* fe case */
+	} else {
 		ret = wait_event_interruptible(dev->openq,
 			hab_open_request_find(ctx, dev, listen, recv_request));
 		if (ctx->closing) {
@@ -171,6 +178,9 @@ int hab_open_listen(struct uhab_context *ctx,
 		} else if (-ERESTARTSYS == ret) {
 			pr_warn("local interrupted ret %d\n", ret);
 			ret = -EINTR;
+		} else if (hab_is_forbidden(ctx, dev, listen->xdata.sub_id)) {
+			pr_info("local open cancelled ret %d\n", ret);
+			ret = -ENXIO;
 		}
 	}
 
