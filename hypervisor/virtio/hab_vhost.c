@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022, 2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 #include <linux/compat.h>
 #include <linux/eventfd.h>
@@ -16,6 +16,7 @@
 
 #include "hab.h"
 #include "vhost.h"
+#include "hab_trace_os.h"
 
 /* Max number of bytes transferred before requeueing the job.
  * Using this limit prevents one virtqueue from starving others.
@@ -149,6 +150,8 @@ static void tx_worker(struct vhost_hab_pchannel *vh_pchan)
 	ssize_t copy_size;
 	struct hab_header header;
 
+	trace_hab_txworker_start(vh_pchan->pchan);
+
 	mutex_lock(&vq->mutex);
 	if (!vq->private_data) {
 		mutex_unlock(&vq->mutex);
@@ -184,6 +187,7 @@ static void tx_worker(struct vhost_hab_pchannel *vh_pchan)
 				pr_err("fault on copy_from_iter, out_len %lu, ret %lu\n",
 					out_len, copy_size);
 
+			trace_hab_pchan_recv_start(vh_pchan->pchan);
 			ret = hab_msg_recv(vh_pchan->pchan, &header);
 			if (ret)
 				pr_err("hab_msg_recv error %d\n", ret);
@@ -211,6 +215,7 @@ static void tx_worker(struct vhost_hab_pchannel *vh_pchan)
 	}
 
 	mutex_unlock(&vq->mutex);
+	trace_hab_txworker_end(vh_pchan->pchan);
 }
 
 static void do_tx_recv_work(struct vhost_work *work)
@@ -954,6 +959,8 @@ static int rx_worker(struct vhost_hab_pchannel *vh_pchan)
 	struct vhost_dev *dev = vq->dev;
 	int ret = 0, has_send = 1, added = 0;
 
+	trace_hab_rxworker_start(vh_pchan->pchan);
+
 	mutex_lock(&vq->mutex);
 
 	vh_pchan = vq->private_data;
@@ -982,11 +989,14 @@ static int rx_worker(struct vhost_hab_pchannel *vh_pchan)
 			list_del(&send_node->node);
 			mutex_unlock(&vh_pchan->send_list_mutex);
 			kfree(send_node); /* send OK process more */
+			trace_hab_rxworker_send_one(vh_pchan->pchan);
 		}
 	}
 
 	if (added)
 		vhost_signal(dev, vq);
+
+	trace_hab_rxworker_end(vh_pchan->pchan);
 
 err_unlock:
 	mutex_unlock(&vq->mutex);
@@ -1008,6 +1018,8 @@ int physical_channel_send(struct physical_channel *pchan,
 		return -ENODEV;
 	}
 
+	trace_hab_pchan_send_start(pchan);
+
 	vq = &vh_pchan->vqs[VHOST_HAB_PCHAN_RX_VQ];
 	vh_dev = container_of(vq->dev, struct vhost_hab_dev, dev);
 
@@ -1023,6 +1035,7 @@ int physical_channel_send(struct physical_channel *pchan,
 	list_add_tail(&send_node->node, &vh_pchan->send_list);
 	mutex_unlock(&vh_pchan->send_list_mutex);
 
+	trace_hab_pchan_send_done(pchan);
 	vhost_work_queue(&vh_dev->dev, &vh_pchan->rx_send_work);
 
 	return 0;
