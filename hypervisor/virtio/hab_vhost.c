@@ -757,7 +757,7 @@ int hab_hypervisor_register(void)
 	g_vh.major = MAJOR(dev_no);
 
 	pr_info("g_vh.major %d\n", g_vh.major);
-	g_vh.class = class_create(THIS_MODULE, "vhost-msm");
+	g_vh.class = class_create("vhost-msm");
 	if (IS_ERR_OR_NULL(g_vh.class)) {
 		pr_err("class_create failed\n");
 		unregister_chrdev_region(g_vh.major, max_devices);
