@@ -990,6 +990,11 @@ static int rx_worker(struct vhost_hab_pchannel *vh_pchan)
 
 err_unlock:
 	mutex_unlock(&vq->mutex);
+	if (ret == -EAGAIN) {
+		pr_warn("no avail buff on %s RX_VQ, retry\n", vh_pchan->pchan->name);
+		vhost_poll_queue(&vq->poll);
+	}
+
 	return 0;
 }
 
