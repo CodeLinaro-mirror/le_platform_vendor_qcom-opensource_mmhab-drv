@@ -29,6 +29,12 @@
  */
 #define VHOST_HAB_PKT_WEIGHT 256
 
+/*
+ * In buffer size defined in FE side
+ * TODO: utilize virtio feature bits to negotiate the size
+ */
+#define IN_BUF_SIZE 5120
+
 enum {
 	VHOST_HAB_PCHAN_TX_VQ = 0, /* receive data from gvm */
 	VHOST_HAB_PCHAN_RX_VQ, /* send data to gvm */
@@ -1021,6 +1027,12 @@ int physical_channel_send(struct physical_channel *pchan,
 	if (!vh_pchan) {
 		pr_err("pchan is not ready yet\n");
 		return -ENODEV;
+	}
+
+	if (sizebytes > (IN_BUF_SIZE - sizeof(struct hab_header))) {
+		pr_err("msg size out of range %u, max: %u\n",
+			sizebytes, (IN_BUF_SIZE - sizeof(struct hab_header)));
+		return -EINVAL;
 	}
 
 	trace_hab_pchan_send_start(pchan);
