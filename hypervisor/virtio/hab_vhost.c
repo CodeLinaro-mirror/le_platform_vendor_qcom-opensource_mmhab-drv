@@ -13,6 +13,8 @@
 #include <linux/slab.h>
 #include <linux/vhost.h>
 #include <linux/workqueue.h>
+#include <linux/sched/task.h>
+#include <uapi/linux/sched/types.h>
 
 #include "hab.h"
 #include "vhost.h"
@@ -149,6 +151,25 @@ static void tx_worker(struct vhost_hab_pchannel *vh_pchan)
 	size_t out_len, in_len, total_len = 0;
 	ssize_t copy_size;
 	struct hab_header header;
+	unsigned int policy = current->policy;
+	struct sched_attr attr = {
+		.sched_policy = SCHED_FIFO,
+		/*
+		 * The priority here is intentionally lower than MAX_RT_PRIO / 2(49).
+		 * Because in RT kernel the execution contextes of below entities
+		 * - IRQ handler allocated via request_irq/request_threaded_irq
+		 * - IRQ thread_fn allocated via request_threaded_irq
+		 * - SoftIRQ
+		 * are all kthreads with FIFO schedule policy + 49 priority set via
+		 * sched_set_fifo().
+		 * Thus, HAB Vhost worker shall use lower priority to prevent from
+		 * preempting above three entities.
+		 */
+		.sched_priority = MAX_RT_PRIO / 2 - 1,
+	};
+
+	if (policy == SCHED_NORMAL)
+		sched_setattr_nocheck(current, &attr);
 
 	trace_hab_txworker_start(vh_pchan->pchan);
 
@@ -958,6 +979,15 @@ static int rx_worker(struct vhost_hab_pchannel *vh_pchan)
 	struct vhost_virtqueue *vq = &vh_pchan->vqs[VHOST_HAB_PCHAN_RX_VQ];
 	struct vhost_dev *dev = vq->dev;
 	int ret = 0, has_send = 1, added = 0;
+	unsigned int policy = current->policy;
+	struct sched_attr attr = {
+		.sched_policy = SCHED_FIFO,
+		/* refer tx_worker's priority and sched policy */
+		.sched_priority = MAX_RT_PRIO / 2 - 1,
+	};
+
+	if (policy == SCHED_NORMAL)
+		sched_setattr_nocheck(current, &attr);
 
 	trace_hab_rxworker_start(vh_pchan->pchan);
 
