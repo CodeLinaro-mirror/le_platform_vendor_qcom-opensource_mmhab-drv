@@ -442,6 +442,7 @@ void hab_vchan_stop(struct virtual_channel *vchan);
 void hab_vchans_stop(struct physical_channel *pchan);
 void hab_vchan_stop_notify(struct virtual_channel *vchan);
 void hab_vchans_empty_wait(int vmid);
+void hab_vchans_empty_wait_pchan(struct physical_channel *pchan);
 
 int hab_mem_export(struct uhab_context *ctx,
 		struct hab_export *param, int kernel);

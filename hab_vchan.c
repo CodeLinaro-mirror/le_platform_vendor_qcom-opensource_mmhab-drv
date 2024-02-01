@@ -54,7 +54,6 @@ hab_vchan_alloc(struct uhab_context *ctx, struct physical_channel *pchan,
 	kref_init(&vchan->refcount);
 
 	vchan->otherend_closed = pchan->closed;
-
 	hab_ctx_get(ctx);
 	vchan->ctx = ctx;
 
@@ -178,7 +177,6 @@ void hab_vchan_stop(struct virtual_channel *vchan)
 void hab_vchans_stop(struct physical_channel *pchan)
 {
 	struct virtual_channel *vchan, *tmp;
-
 	read_lock(&pchan->vchans_lock);
 	list_for_each_entry_safe(vchan, tmp, &pchan->vchannels, pnode) {
 		hab_vchan_stop(vchan);
@@ -208,8 +206,8 @@ static int hab_vchans_per_pchan_empty(struct physical_channel *pchan)
 			if (!vchan->session_id)
 				vcnt--;
 			else
-				pr_err("vchan %pK %x rm %x sn %d rf %d clsd %d rm clsd %d\n",
-					vchan, vchan->id,
+				pr_err("vchan %pK name %s %x rm %x sn %d rf %d clsd %d rm clsd %d\n",
+					vchan, vchan->pchan->name, vchan->id,
 					vchan->otherend_id,
 					vchan->session_id,
 					get_refcnt(vchan->refcount),
@@ -255,12 +253,26 @@ static int hab_vchans_empty(int vmid)
  */
 void hab_vchans_empty_wait(int vmid)
 {
-	pr_info("waiting for GVM%d's sockets closure\n", vmid);
+	pr_debug("waiting for GVM%d's sockets closure\n", vmid);
 
 	while (!hab_vchans_empty(vmid))
 		usleep_range(10000, 12000);
 
-	pr_info("all of GVM%d's sockets are closed\n", vmid);
+	pr_debug("all of GVM%d's sockets are closed\n", vmid);
+}
+
+/*
+ * block until all vchans of a given pchan are explicitly closed
+ * with habmm_socket_close() by hab clients themselves
+ */
+void hab_vchans_empty_wait_pchan(struct physical_channel *pchan)
+{
+        pr_debug("waiting for vchan's sockets closure for %s\n", pchan->name);
+
+        while (!hab_vchans_per_pchan_empty(pchan))
+                usleep_range(10000, 12000);
+
+        pr_debug("all of vchan's sockets are closed for %s\n", pchan->name);
 }
 
 int hab_vchan_find_domid(struct virtual_channel *vchan)

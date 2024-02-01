@@ -398,6 +398,9 @@ static int vhost_hab_release(struct inode *inode, struct file *f)
 	list_for_each_entry_safe(vh_pchan, vh_pchan_t,
 				&vh_dev->vh_pchan_list, node) {
 		if (vh_pchan->pchan) {
+			/* reset the seq_rx here */
+			vh_pchan->pchan->sequence_rx = 0;
+			vh_pchan->pchan->sequence_tx = 0;
 			vh_pchan->pchan->hyp_data = NULL;
 			hab_pchan_put(vh_pchan->pchan);
 			vh_pchan->pchan = NULL;
@@ -527,7 +530,19 @@ static long vhost_hab_reset_owner(struct vhost_hab_dev *vh_dev)
 {
 	long err;
 	struct vhost_iotlb *umem;
+	struct vhost_hab_pchannel *vh_pchan;
 
+	/* stop All vchans of a given vhost-dev (Eg Audio/video etc) */
+	list_for_each_entry(vh_pchan, &vh_dev->vh_pchan_list, node) {
+		if (vh_pchan)
+			hab_vchans_stop(vh_pchan->pchan);
+	}
+
+	/* hab driver is expecting BEs to close all the vchans */
+	list_for_each_entry(vh_pchan, &vh_dev->vh_pchan_list, node) {
+                if (vh_pchan)
+			hab_vchans_empty_wait_pchan(vh_pchan->pchan);
+        }
 
 	mutex_lock(&vh_dev->dev.mutex);
 	err = vhost_dev_check_owner(&vh_dev->dev);
