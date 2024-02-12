@@ -342,8 +342,7 @@ static int __init hab_init(void)
 		return result;
 	}
 
-	hab_driver.class = class_create(THIS_MODULE, "hab");
-
+	hab_driver.class = class_create("hab");
 	if (IS_ERR(hab_driver.class)) {
 		result = PTR_ERR(hab_driver.class);
 		pr_err("class_create failed: %d\n", result);

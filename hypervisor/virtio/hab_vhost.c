@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022, 2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 #include <linux/compat.h>
 #include <linux/eventfd.h>
@@ -13,9 +13,12 @@
 #include <linux/slab.h>
 #include <linux/vhost.h>
 #include <linux/workqueue.h>
+#include <linux/sched/task.h>
+#include <uapi/linux/sched/types.h>
 
 #include "hab.h"
 #include "vhost.h"
+#include "hab_trace_os.h"
 
 /* Max number of bytes transferred before requeueing the job.
  * Using this limit prevents one virtqueue from starving others.
@@ -27,6 +30,12 @@
  * pkts.
  */
 #define VHOST_HAB_PKT_WEIGHT 256
+
+/*
+ * In buffer size defined in FE side
+ * TODO: utilize virtio feature bits to negotiate the size
+ */
+#define IN_BUF_SIZE 5120
 
 enum {
 	VHOST_HAB_PCHAN_TX_VQ = 0, /* receive data from gvm */
@@ -148,6 +157,27 @@ static void tx_worker(struct vhost_hab_pchannel *vh_pchan)
 	size_t out_len, in_len, total_len = 0;
 	ssize_t copy_size;
 	struct hab_header header;
+	unsigned int policy = current->policy;
+	struct sched_attr attr = {
+		.sched_policy = SCHED_FIFO,
+		/*
+		 * The priority here is intentionally lower than MAX_RT_PRIO / 2(49).
+		 * Because in RT kernel the execution contextes of below entities
+		 * - IRQ handler allocated via request_irq/request_threaded_irq
+		 * - IRQ thread_fn allocated via request_threaded_irq
+		 * - SoftIRQ
+		 * are all kthreads with FIFO schedule policy + 49 priority set via
+		 * sched_set_fifo().
+		 * Thus, HAB Vhost worker shall use lower priority to prevent from
+		 * preempting above three entities.
+		 */
+		.sched_priority = MAX_RT_PRIO / 2 - 1,
+	};
+
+	if (policy == SCHED_NORMAL)
+		sched_setattr_nocheck(current, &attr);
+
+	trace_hab_txworker_start(vh_pchan->pchan);
 
 	mutex_lock(&vq->mutex);
 	if (!vq->private_data) {
@@ -184,6 +214,7 @@ static void tx_worker(struct vhost_hab_pchannel *vh_pchan)
 				pr_err("fault on copy_from_iter, out_len %lu, ret %lu\n",
 					out_len, copy_size);
 
+			trace_hab_pchan_recv_start(vh_pchan->pchan);
 			ret = hab_msg_recv(vh_pchan->pchan, &header);
 			if (ret)
 				pr_err("hab_msg_recv error %d\n", ret);
@@ -211,6 +242,7 @@ static void tx_worker(struct vhost_hab_pchannel *vh_pchan)
 	}
 
 	mutex_unlock(&vq->mutex);
+	trace_hab_txworker_end(vh_pchan->pchan);
 }
 
 static void do_tx_recv_work(struct vhost_work *work)
@@ -254,7 +286,7 @@ static int vhost_hab_open(struct inode *inode, struct file *f)
 	int i, j = 0;
 	int ret;
 
-	vh_dev = kmalloc(sizeof(*vh_dev), GFP_KERNEL);
+	vh_dev = kzalloc(sizeof(*vh_dev), GFP_KERNEL);
 	if (!vh_dev)
 		return -ENOMEM;
 
@@ -725,7 +757,7 @@ int hab_hypervisor_register(void)
 	g_vh.major = MAJOR(dev_no);
 
 	pr_info("g_vh.major %d\n", g_vh.major);
-	g_vh.class = class_create(THIS_MODULE, "vhost-msm");
+	g_vh.class = class_create("vhost-msm");
 	if (IS_ERR_OR_NULL(g_vh.class)) {
 		pr_err("class_create failed\n");
 		unregister_chrdev_region(g_vh.major, max_devices);
@@ -953,6 +985,17 @@ static int rx_worker(struct vhost_hab_pchannel *vh_pchan)
 	struct vhost_virtqueue *vq = &vh_pchan->vqs[VHOST_HAB_PCHAN_RX_VQ];
 	struct vhost_dev *dev = vq->dev;
 	int ret = 0, has_send = 1, added = 0;
+	unsigned int policy = current->policy;
+	struct sched_attr attr = {
+		.sched_policy = SCHED_FIFO,
+		/* refer tx_worker's priority and sched policy */
+		.sched_priority = MAX_RT_PRIO / 2 - 1,
+	};
+
+	if (policy == SCHED_NORMAL)
+		sched_setattr_nocheck(current, &attr);
+
+	trace_hab_rxworker_start(vh_pchan->pchan);
 
 	mutex_lock(&vq->mutex);
 
@@ -982,14 +1025,22 @@ static int rx_worker(struct vhost_hab_pchannel *vh_pchan)
 			list_del(&send_node->node);
 			mutex_unlock(&vh_pchan->send_list_mutex);
 			kfree(send_node); /* send OK process more */
+			trace_hab_rxworker_send_one(vh_pchan->pchan);
 		}
 	}
 
 	if (added)
 		vhost_signal(dev, vq);
 
+	trace_hab_rxworker_end(vh_pchan->pchan);
+
 err_unlock:
 	mutex_unlock(&vq->mutex);
+	if (ret == -EAGAIN) {
+		pr_warn("no avail buff on %s RX_VQ, retry\n", vh_pchan->pchan->name);
+		vhost_poll_queue(&vq->poll);
+	}
+
 	return 0;
 }
 
@@ -1008,6 +1059,14 @@ int physical_channel_send(struct physical_channel *pchan,
 		return -ENODEV;
 	}
 
+	if (sizebytes > (IN_BUF_SIZE - sizeof(struct hab_header))) {
+		pr_err("msg size out of range %u, max: %u\n",
+			sizebytes, (IN_BUF_SIZE - sizeof(struct hab_header)));
+		return -EINVAL;
+	}
+
+	trace_hab_pchan_send_start(pchan);
+
 	vq = &vh_pchan->vqs[VHOST_HAB_PCHAN_RX_VQ];
 	vh_dev = container_of(vq->dev, struct vhost_hab_dev, dev);
 
@@ -1023,6 +1082,7 @@ int physical_channel_send(struct physical_channel *pchan,
 	list_add_tail(&send_node->node, &vh_pchan->send_list);
 	mutex_unlock(&vh_pchan->send_list_mutex);
 
+	trace_hab_pchan_send_done(pchan);
 	vhost_work_queue(&vh_dev->dev, &vh_pchan->rx_send_work);
 
 	return 0;
