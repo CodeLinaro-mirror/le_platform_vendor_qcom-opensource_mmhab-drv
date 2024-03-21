@@ -7,7 +7,7 @@ LINUXINCLUDE += -I$(HAB_ROOT)/include \
 		-I$(HAB_ROOT)/os \
 		-I$(KERNEL_SRC)/drivers/vhost \
                 -I$(KERNEL_SRC)/include \
-		-I$(KERNEL_SRC)/include/uapi/linux    
+		-I$(KERNEL_SRC)/include/uapi/linux
 
 EXTRA_CFLAGS += -DCONFIG_MSM_VHOST_HAB=1 \
 		-DCONFIG_MSM_HAB_DEFAULT_VMID=2 \
