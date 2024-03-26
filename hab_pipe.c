@@ -44,17 +44,17 @@ struct hab_pipe_endpoint *hab_pipe_init(struct hab_pipe *pipe,
 
 	if (top) {
 		ep = &pipe->top;
-		memset(ep, 0, sizeof(*ep));
+		(void)memset(ep, 0, sizeof(*ep));
 		*tx_buf_p = buf_a;
 		*rx_buf_p = buf_b;
 		pipe->legacy_buf_a = NULL;
 	} else {
 		ep = &pipe->bottom;
-		memset(ep, 0, sizeof(*ep));
+		(void)memset(ep, 0, sizeof(*ep));
 		*tx_buf_p = buf_b;
 		*rx_buf_p = buf_a;
-		memset(buf_b, 0, sizeof(struct hab_shared_buf));
-		memset(buf_a, 0, sizeof(struct hab_shared_buf));
+		(void)memset(buf_b, 0, sizeof(struct hab_shared_buf));
+		(void)memset(buf_a, 0, sizeof(struct hab_shared_buf));
 		buf_a->size = shared_buf_size;
 		buf_b->size = shared_buf_size;
 
@@ -103,14 +103,14 @@ uint32_t hab_pipe_write(struct hab_pipe_endpoint *ep,
 	count2 = num_bytes - count1;
 
 	if (count1 > 0) {
-		memcpy((void *)&sh_buf->data[ep_tx_index], p, count1);
+		(void)memcpy((void *)&sh_buf->data[ep_tx_index], p, count1);
 		ep_tx_wr_count += count1;
 		ep_tx_index += count1;
 		if (ep_tx_index >= buf_size)
 			ep_tx_index = 0;
 	}
 	if (count2 > 0) {/* handle buffer wrapping */
-		memcpy((void *)&sh_buf->data[ep_tx_index],
+		(void)memcpy((void *)&sh_buf->data[ep_tx_index],
 			p + count1, count2);
 		ep_tx_wr_count += count2;
 		ep_tx_index += count2;
@@ -169,13 +169,13 @@ uint32_t hab_pipe_read(struct hab_pipe_endpoint *ep,
 	count2 = to_read - count1;
 
 	if (count1 > 0) {
-		memcpy(p, (void *)&sh_buf->data[ep_rx_index], count1);
+		(void)memcpy(p, (void *)&sh_buf->data[ep_rx_index], count1);
 		ep_rx_index += count1;
 		if (ep_rx_index >= buf_size)
 			ep_rx_index = 0;
 	}
 	if (count2 > 0) { /* handle buffer wrapping */
-		memcpy(p + count1, (void *)&sh_buf->data[ep_rx_index],
+		(void)memcpy(p + count1, (void *)&sh_buf->data[ep_rx_index],
 			count2);
 		ep_rx_index += count2;
 	}
@@ -200,10 +200,10 @@ retry:
 					ep->rx_info.index, index_saved,
 					retry_cnt);
 				if (retry_cnt++ <= 1000) {
-					memcpy(p, &sh_buf->data[index_saved],
+					(void)memcpy(p, &sh_buf->data[index_saved],
 						   count1);
 					if (count2)
-						memcpy(&p[count1],
+						(void)memcpy(&p[count1],
 						&sh_buf->data[ep_rx_index - count2],
 						count2);
 					if (!signature_mismatch)
@@ -233,7 +233,7 @@ retry:
 			if (ep->rx_info.index >= sh_buf->size)
 				ep->rx_info.index = 0;
 
-			to_read = (retry_cnt < 1000) ? 0xFFFFFFFE : 0xFFFFFFFF;
+			to_read = (retry_cnt < 1000) ? 0xFFFFFFFEU : 0xFFFFFFFFU;
 		}
 
 		/*Must commit data before incremeting count*/

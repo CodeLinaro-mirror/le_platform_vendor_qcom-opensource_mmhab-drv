@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022, 2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 #include "hab.h"
 
@@ -9,12 +9,12 @@
 #include "hab_trace_os.h"
 
 #define HAB_DEVICE_CNSTR(__name__, __id__, __num__) { \
-	.name = __name__,\
-	.id = __id__,\
-	.pchannels = LIST_HEAD_INIT(hab_devices[__num__].pchannels),\
-	.pchan_lock = __RW_LOCK_UNLOCKED(hab_devices[__num__].pchan_lock),\
-	.openq_list = LIST_HEAD_INIT(hab_devices[__num__].openq_list),\
-	.openlock = __SPIN_LOCK_UNLOCKED(&hab_devices[__num__].openlock)\
+	.name = (__name__),\
+	.id = (__id__),\
+	.pchannels = LIST_HEAD_INIT(hab_devices[(__num__)].pchannels),\
+	.pchan_lock = __RW_LOCK_UNLOCKED(hab_devices[(__num__)].pchan_lock),\
+	.openq_list = LIST_HEAD_INIT(hab_devices[(__num__)].openq_list),\
+	.openlock = __SPIN_LOCK_UNLOCKED(&hab_devices[(__num__)].openlock)\
 	}
 
 static const char hab_info_str[] = "Change: 17280941 Revision: #81";
@@ -122,7 +122,7 @@ void hab_ctx_free(struct kref *ref)
 	int i;
 	struct uhab_context *ctxdel, *ctxtmp;
 	struct hab_open_node *open_node;
-	struct export_desc *exp = NULL, *exp_tmp = NULL;
+	struct export_desc *export = NULL, *exp_tmp = NULL;
 	struct hab_forbidden_node *forbidden = NULL, *forbidden_tmp = NULL;
 
 	spin_lock_bh(&ctx->forbidden_lock);
@@ -137,26 +137,26 @@ void hab_ctx_free(struct kref *ref)
 
 	/* garbage-collect exp/imp buffers */
 	write_lock_bh(&ctx->exp_lock);
-	list_for_each_entry_safe(exp, exp_tmp, &ctx->exp_whse, node) {
-		list_del(&exp->node);
+	list_for_each_entry_safe(export, exp_tmp, &ctx->exp_whse, node) {
+		list_del(&export->node);
 		pr_debug("potential leak exp %d vcid %X recovered\n",
-				exp->export_id, exp->vcid_local);
-		habmem_hyp_revoke(exp->payload, exp->payload_count);
+				export->export_id, export->vcid_local);
+		(void)habmem_hyp_revoke(export->payload, export->payload_count);
 		write_unlock_bh(&ctx->exp_lock);
-		habmem_remove_export(exp);
+		habmem_remove_export(export);
 		write_lock_bh(&ctx->exp_lock);
 	}
 	write_unlock_bh(&ctx->exp_lock);
 
 	spin_lock_bh(&ctx->imp_lock);
-	list_for_each_entry_safe(exp, exp_tmp, &ctx->imp_whse, node) {
-		list_del(&exp->node);
+	list_for_each_entry_safe(export, exp_tmp, &ctx->imp_whse, node) {
+		list_del(&export->node);
 		ctx->import_total--;
 		pr_debug("leaked imp %d vcid %X for ctx is collected total %d\n",
-			exp->export_id, exp->vcid_local,
+			export->export_id, export->vcid_local,
 			ctx->import_total);
-		habmm_imp_hyp_unmap(ctx->import_ctx, exp, ctx->kernel);
-		kfree(exp);
+		(void)habmm_imp_hyp_unmap(ctx->import_ctx, export, ctx->kernel);
+		kfree(export);
 	}
 	spin_unlock_bh(&ctx->imp_lock);
 
@@ -279,7 +279,7 @@ struct hab_device *find_hab_device(unsigned int mm_id)
  *  send(INIT_DONE)     wait(INIT_DONE)
 
  */
-struct virtual_channel *frontend_open(struct uhab_context *ctx,
+static struct virtual_channel *frontend_open(struct uhab_context *ctx,
 		unsigned int mm_id,
 		int dom_id)
 {
@@ -329,53 +329,54 @@ struct virtual_channel *frontend_open(struct uhab_context *ctx,
 	pending_open.request = request;
 
 	/* during wait app could be terminated */
-	hab_open_pending_enter(ctx, pchan, &pending_open);
+	(void)hab_open_pending_enter(ctx, pchan, &pending_open);
 
 	/* Wait for Init-Ack sequence */
 	hab_open_request_init(&request, HAB_PAYLOAD_TYPE_INIT_ACK, pchan,
 		0, sub_id, open_id);
 	/* wait forever */
 	ret = hab_open_listen(ctx, dev, &request, &recv_request, 0);
-	if (!ret && recv_request && ((recv_request->xdata.ver_fe & 0xFFFF0000)
-		!= (recv_request->xdata.ver_be & 0xFFFF0000))) {
+	if (!ret && recv_request && ((recv_request->xdata.ver_fe & 0xFFFF0000U)
+		!= (recv_request->xdata.ver_be & 0xFFFF0000U))) {
 		/* version check */
 		pr_err("hab major version mismatch fe %X be %X on mmid %d\n",
 			recv_request->xdata.ver_fe,
 			recv_request->xdata.ver_be, mm_id);
 
-		hab_open_pending_exit(ctx, pchan, &pending_open);
+		(void)hab_open_pending_exit(ctx, pchan, &pending_open);
 		ret = -EPROTO;
 		goto err;
-	} else if (ret || !recv_request) {
-		pr_err("hab_open_listen failed: %d, send cancel vcid %x subid %d openid %d\n",
-			ret, vchan->id,
-			sub_id, open_id);
-		/* send cancel to BE due to FE's local close */
-		hab_open_request_init(&request, HAB_PAYLOAD_TYPE_INIT_CANCEL,
-					pchan, vchan->id, sub_id, open_id);
-		request.xdata.ver_fe = HAB_API_VER;
-		ret2 = hab_open_request_send(&request);
-		if (ret2)
-			pr_err("send init_cancel failed %d on vcid %x\n", ret2,
-				   vchan->id);
-		hab_open_pending_exit(ctx, pchan, &pending_open);
+	} else
+		if (ret || !recv_request) {
+			pr_err("hab_open_listen failed: %d, send cancel vcid %x subid %d openid %d\n",
+				ret, vchan->id,
+				sub_id, open_id);
+			/* send cancel to BE due to FE's local close */
+			hab_open_request_init(&request, HAB_PAYLOAD_TYPE_INIT_CANCEL,
+						pchan, vchan->id, sub_id, open_id);
+			request.xdata.ver_fe = HAB_API_VER;
+			ret2 = hab_open_request_send(&request);
+			if (ret2)
+				pr_err("send init_cancel failed %d on vcid %x\n", ret2,
+					vchan->id);
+			(void)hab_open_pending_exit(ctx, pchan, &pending_open);
 
-		if (ret != -EINTR && ret != -ENXIO)
-			ret = -EINVAL;
-		goto err;
-	}
+			if (ret != -EINTR && ret != -ENXIO)
+				ret = -EINVAL;
+			goto err;
+		}
 
 	/* remove pending open locally after good pairing */
-	hab_open_pending_exit(ctx, pchan, &pending_open);
+	(void)hab_open_pending_exit(ctx, pchan, &pending_open);
 
-	pr_debug("hab version match fe %X be %X on mmid %d\n",
+	pr_debug("hab version fe %X be %X on mmid %d\n",
 		recv_request->xdata.ver_fe, recv_request->xdata.ver_be,
 		mm_id);
 
 	vchan->otherend_id = recv_request->xdata.vchan_id;
 	hab_open_request_free(recv_request);
 
-	/* Send Ack sequence */
+	/* Send Init-Done sequence */
 	hab_open_request_init(&request, HAB_PAYLOAD_TYPE_INIT_DONE, pchan,
 		0, sub_id, open_id);
 	request.xdata.ver_fe = HAB_API_VER;
@@ -398,7 +399,7 @@ err:
 	return ERR_PTR(ret);
 }
 
-struct virtual_channel *backend_listen(struct uhab_context *ctx,
+static struct virtual_channel *backend_listen(struct uhab_context *ctx,
 		unsigned int mm_id, int timeout)
 {
 	int ret, ret2;
@@ -439,25 +440,25 @@ struct virtual_channel *backend_listen(struct uhab_context *ctx,
 						ctx->closing);
 			}
 			goto err;
-		} else if (!ret && recv_request &&
-				   ((recv_request->xdata.ver_fe & 0xFFFF0000) !=
-					(HAB_API_VER & 0xFFFF0000))) {
-			int ret2;
-			/* version check */
-			pr_err("version mismatch fe %X be %X on mmid %d\n",
-			   recv_request->xdata.ver_fe, HAB_API_VER, mm_id);
-			hab_open_request_init(&request,
-				HAB_PAYLOAD_TYPE_INIT_ACK,
-				NULL, 0, sub_id, recv_request->xdata.open_id);
-			request.xdata.ver_be = HAB_API_VER;
-			/* reply to allow FE to bail out */
-			ret2 = hab_open_request_send(&request);
-			if (ret2)
-				pr_err("send FE version mismatch failed mmid %d sub %d\n",
-					   mm_id, sub_id);
-			ret = -EPROTO;
-			goto err;
-		}
+		} else
+			if (!ret && recv_request &&
+				   ((recv_request->xdata.ver_fe & 0xFFFF0000U) !=
+					(HAB_API_VER & 0xFFFF0000U))) {
+				/* version check */
+				pr_err("version mismatch fe %X be %X on mmid %d\n",
+				recv_request->xdata.ver_fe, HAB_API_VER, mm_id);
+				hab_open_request_init(&request,
+					HAB_PAYLOAD_TYPE_INIT_ACK,
+					NULL, 0, sub_id, recv_request->xdata.open_id);
+				request.xdata.ver_be = HAB_API_VER;
+				/* reply to allow FE to bail out */
+				ret2 = hab_open_request_send(&request);
+				if (ret2)
+					pr_err("send FE version mismatch failed mmid %d sub %d\n",
+						mm_id, sub_id);
+				ret = -EPROTO;
+				goto err;
+			}
 
 		/* guest id from guest */
 		otherend_vchan_id = recv_request->xdata.vchan_id;
@@ -487,14 +488,14 @@ struct virtual_channel *backend_listen(struct uhab_context *ctx,
 
 		pending_open.request = request;
 		/* wait only after init-ack is sent */
-		hab_open_pending_enter(ctx, pchan, &pending_open);
+		(void)hab_open_pending_enter(ctx, pchan, &pending_open);
 
 		/* Wait for Ack sequence */
 		hab_open_request_init(&request, HAB_PAYLOAD_TYPE_INIT_DONE,
 				pchan, 0, sub_id, open_id);
 		ret = hab_open_listen(ctx, dev, &request, &recv_request,
 			HAB_HS_TIMEOUT);
-		hab_open_pending_exit(ctx, pchan, &pending_open);
+		(void)hab_open_pending_exit(ctx, pchan, &pending_open);
 		if (ret && recv_request &&
 			recv_request->type == HAB_PAYLOAD_TYPE_INIT_CANCEL) {
 			pr_err("listen cancelled vcid %x subid %d openid %d ret %d\n",
@@ -511,17 +512,18 @@ struct virtual_channel *backend_listen(struct uhab_context *ctx,
 			if (ret2)
 				pr_err("send init_ack failed %d on vcid %x\n",
 					ret2, vchan->id);
-			hab_open_pending_exit(ctx, pchan, &pending_open);
+			(void)hab_open_pending_exit(ctx, pchan, &pending_open);
 
 			ret = -ENODEV; /* open request cancelled remotely */
 			break;
 		} else if (ret == -ENXIO) {
 			pr_warn("backend mmid %d listen canceling\n", mm_id);
 			goto err;
-		}else if (ret != -EAGAIN) {
-			hab_open_pending_exit(ctx, pchan, &pending_open);
-			break; /* received something. good case! */
-		}
+		} else
+			if (ret != -EAGAIN) {
+				(void)hab_open_pending_exit(ctx, pchan, &pending_open);
+				break; /* received something. good case! */
+			}
 
 		/* stay in the loop retry */
 		pr_warn("retry open ret %d vcid %X remote %X sub %d open %d\n",
@@ -536,7 +538,7 @@ struct virtual_channel *backend_listen(struct uhab_context *ctx,
 		if (ret2)
 			pr_err("send init_ack failed %d on vcid %x\n", ret2,
 				   vchan->id);
-		hab_open_pending_exit(ctx, pchan, &pending_open);
+		(void)hab_open_pending_exit(ctx, pchan, &pending_open);
 
 		hab_vchan_put(vchan);
 		vchan = NULL;
@@ -846,7 +848,7 @@ void hab_send_close_msg(struct virtual_channel *vchan)
 		HAB_HEADER_SET_TYPE(header, HAB_PAYLOAD_TYPE_CLOSE);
 		HAB_HEADER_SET_ID(header, vchan->otherend_id);
 		HAB_HEADER_SET_SESSION_ID(header, vchan->session_id);
-		physical_channel_send(vchan->pchan, &header, NULL);
+		(void)physical_channel_send(vchan->pchan, &header, NULL);
 	}
 }
 
@@ -915,8 +917,8 @@ static int hab_initialize_pchan_entry(struct hab_device *mmid_device,
 		return -EINVAL;
 	}
 
-	snprintf(pchan_name, MAX_VMID_NAME_SIZE, "vm%d-", vmid);
-	strlcat(pchan_name, mmid_device->name, MAX_VMID_NAME_SIZE);
+	(void)snprintf(pchan_name, MAX_VMID_NAME_SIZE, "vm%d-", vmid);
+	(void)strlcat(pchan_name, mmid_device->name, MAX_VMID_NAME_SIZE);
 
 	ret = habhyp_commdev_alloc((void **)&pchan, is_be, pchan_name,
 					vmid_remote, mmid_device);
@@ -1088,13 +1090,13 @@ int do_hab_parse(void)
 	}
 
 	/* read in hab config and create pchans*/
-	memset(&hab_driver.settings, HABCFG_VMID_INVALID,
+	(void)memset(&hab_driver.settings, HABCFG_VMID_INVALID,
 				sizeof(hab_driver.settings));
 	result = hab_parse(&hab_driver.settings);
 	if (result) {
 		pr_err("hab config open failed, prepare default gvm %d settings\n",
 			   default_gvmid);
-		fill_default_gvm_settings(&hab_driver.settings, default_gvmid,
+		(void)fill_default_gvm_settings(&hab_driver.settings, default_gvmid,
 						MM_AUD_START, MM_ID_MAX);
 	}
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022, 2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 #include "hab.h"
 #include "hab_grantable.h"
@@ -119,13 +119,13 @@ static int print_ctx_total_expimp(struct uhab_context *ctx,
 	struct compressed_pfns *pfn_table = NULL;
 	int exp_total = 0, imp_total = 0;
 	int exp_cnt = 0, imp_cnt = 0;
-	struct export_desc *exp = NULL;
+	struct export_desc *export = NULL;
 	int exim_size = 0;
 	int ret = 0;
 
 	read_lock(&ctx->exp_lock);
-	list_for_each_entry(exp, &ctx->exp_whse, node) {
-		pfn_table =	(struct compressed_pfns *)exp->payload;
+	list_for_each_entry(export, &ctx->exp_whse, node) {
+		pfn_table =	(struct compressed_pfns *)export->payload;
 		exim_size = get_pft_tbl_total_size(pfn_table);
 		exp_total += exim_size;
 		exp_cnt++;
@@ -133,9 +133,9 @@ static int print_ctx_total_expimp(struct uhab_context *ctx,
 	read_unlock(&ctx->exp_lock);
 
 	spin_lock_bh(&ctx->imp_lock);
-	list_for_each_entry(exp, &ctx->imp_whse, node) {
-		if (habmm_imp_hyp_map_check(ctx->import_ctx, exp)) {
-			pfn_table =	(struct compressed_pfns *)exp->payload;
+	list_for_each_entry(export, &ctx->imp_whse, node) {
+		if (habmm_imp_hyp_map_check(ctx->import_ctx, export)) {
+			pfn_table =	(struct compressed_pfns *)export->payload;
 			exim_size = get_pft_tbl_total_size(pfn_table);
 			imp_total += exim_size;
 			imp_cnt++;
@@ -144,7 +144,7 @@ static int print_ctx_total_expimp(struct uhab_context *ctx,
 	spin_unlock_bh(&ctx->imp_lock);
 
 	if (exp_cnt || exp_total || imp_cnt || imp_total)
-		hab_stat_buffer_print(buf, size,
+		ret = hab_stat_buffer_print(buf, size,
 				"ctx %d exp %d size %d imp %d size %d\n",
 				ctx->owner, exp_cnt, exp_total,
 				imp_cnt, imp_total);
@@ -152,26 +152,26 @@ static int print_ctx_total_expimp(struct uhab_context *ctx,
 		return 0;
 
 	read_lock(&ctx->exp_lock);
-	hab_stat_buffer_print(buf, size, "export[expid:vcid:size]: ");
-	list_for_each_entry(exp, &ctx->exp_whse, node) {
-		pfn_table =	(struct compressed_pfns *)exp->payload;
+	ret = hab_stat_buffer_print(buf, size, "export[expid:vcid:size]: ");
+	list_for_each_entry(export, &ctx->exp_whse, node) {
+		pfn_table =	(struct compressed_pfns *)export->payload;
 		exim_size = get_pft_tbl_total_size(pfn_table);
-		hab_stat_buffer_print(buf, size,
-			"[%d:%x:%d] ", exp->export_id,
-			exp->vcid_local, exim_size);
+		ret = hab_stat_buffer_print(buf, size,
+			"[%d:%x:%d] ", export->export_id,
+			export->vcid_local, exim_size);
 	}
-	hab_stat_buffer_print(buf, size, "\n");
+	ret = hab_stat_buffer_print(buf, size, "\n");
 	read_unlock(&ctx->exp_lock);
 
 	spin_lock_bh(&ctx->imp_lock);
-	hab_stat_buffer_print(buf, size, "import[expid:vcid:size]: ");
-	list_for_each_entry(exp, &ctx->imp_whse, node) {
-		if (habmm_imp_hyp_map_check(ctx->import_ctx, exp)) {
-			pfn_table =	(struct compressed_pfns *)exp->payload;
+	ret = hab_stat_buffer_print(buf, size, "import[expid:vcid:size]: ");
+	list_for_each_entry(export, &ctx->imp_whse, node) {
+		if (habmm_imp_hyp_map_check(ctx->import_ctx, export)) {
+			pfn_table =	(struct compressed_pfns *)export->payload;
 			exim_size = get_pft_tbl_total_size(pfn_table);
-			hab_stat_buffer_print(buf, size,
-				"[%d:%x:%d] ", exp->export_id,
-				exp->vcid_local, exim_size);
+			ret = hab_stat_buffer_print(buf, size,
+				"[%d:%x:%d] ", export->export_id,
+				export->vcid_local, exim_size);
 		}
 	}
 	ret = hab_stat_buffer_print(buf, size, "\n");
@@ -233,9 +233,9 @@ int dump_hab_open(void)
 	char file_time[100];
 
 	rc = dump_hab_get_file_name(file_time, sizeof(file_time));
-	strscpy(file_path, HAB_PIPE_DUMP_FILE_NAME, sizeof(file_path));
-	strlcat(file_path, file_time, sizeof(file_path));
-	strlcat(file_path, HAB_PIPE_DUMP_FILE_EXT, sizeof(file_path));
+	(void)strscpy(file_path, HAB_PIPE_DUMP_FILE_NAME, sizeof(file_path));
+	(void)strlcat(file_path, file_time, sizeof(file_path));
+	(void)strlcat(file_path, HAB_PIPE_DUMP_FILE_EXT, sizeof(file_path));
 
 	filp = vmalloc(HAB_PIPEDUMP_SIZE);
 	if (IS_ERR(filp)) {
@@ -245,7 +245,7 @@ int dump_hab_open(void)
 	} else {
 		pr_info("hab pipe dump buffer opened %s\n", file_path);
 		pipedump_idx = 0;
-		dump_hab_buf(file_path, strlen(file_path)); /* id first */
+		(void)dump_hab_buf(file_path, strlen(file_path)); /* id first */
 	}
 	return rc;
 }
@@ -266,7 +266,7 @@ int dump_hab_buf(void *buf, int size)
 		return 0;
 	}
 
-	memcpy(&filp[pipedump_idx], buf, size);
+	(void)memcpy(&filp[pipedump_idx], buf, size);
 	pipedump_idx += size;
 	return size;
 }
@@ -277,7 +277,7 @@ void dump_hab(int mmid)
 	int i = 0;
 	char str[8] = {35, 35, 35, 35, 35, 35, 35, 35}; /* ## */
 
-	dump_hab_open();
+	(void)dump_hab_open();
 	for (i = 0; i < hab_driver.ndevices; i++) {
 		struct hab_device *habdev = &hab_driver.devp[i];
 
@@ -290,7 +290,7 @@ void dump_hab(int mmid)
 					break;
 				}
 			}
-			dump_hab_buf(str, 8); /* separator */
+			(void)dump_hab_buf(str, 8); /* separator */
 		}
 	}
 	dev_coredumpv(hab_driver.dev, filp, pipedump_idx, GFP_KERNEL);

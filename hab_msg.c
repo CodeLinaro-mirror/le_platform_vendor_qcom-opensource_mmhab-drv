@@ -242,13 +242,13 @@ static void hab_msg_queue(struct virtual_channel *vchan,
 }
 
 static int hab_export_enqueue(struct virtual_channel *vchan,
-		struct export_desc *exp)
+		struct export_desc *export)
 {
 	struct uhab_context *ctx = vchan->ctx;
 	int irqs_disabled = irqs_disabled();
 
 	hab_spin_lock(&ctx->imp_lock, irqs_disabled);
-	list_add_tail(&exp->node, &ctx->imp_whse);
+	list_add_tail(&export->node, &ctx->imp_whse);
 	ctx->import_total++;
 	hab_spin_unlock(&ctx->imp_lock, irqs_disabled);
 
@@ -257,18 +257,18 @@ static int hab_export_enqueue(struct virtual_channel *vchan,
 
 static int hab_send_export_ack(struct virtual_channel *vchan,
 				struct physical_channel *pchan,
-				struct export_desc *exp)
+				struct export_desc *export)
 {
 	struct hab_export_ack exp_ack = {
-		.export_id = exp->export_id,
-		.vcid_local = exp->vcid_local,
-		.vcid_remote = exp->vcid_remote
+		.export_id = export->export_id,
+		.vcid_local = export->vcid_local,
+		.vcid_remote = export->vcid_remote
 	};
 	struct hab_header header = HAB_HEADER_INITIALIZER;
 
 	HAB_HEADER_SET_SIZE(header, sizeof(exp_ack));
 	HAB_HEADER_SET_TYPE(header, HAB_PAYLOAD_TYPE_EXPORT_ACK);
-	HAB_HEADER_SET_ID(header, exp->vcid_local);
+	HAB_HEADER_SET_ID(header, export->vcid_local);
 	HAB_HEADER_SET_SESSION_ID(header, vchan->session_id);
 	return physical_channel_send(pchan, &header, &exp_ack);
 }
@@ -336,7 +336,8 @@ static void hab_msg_drop(struct physical_channel *pchan, size_t sizebytes)
 	data = kmalloc(sizebytes, GFP_ATOMIC);
 	if (data == NULL)
 		return;
-	physical_channel_read(pchan, data, sizebytes);
+	(void)physical_channel_read(pchan, data, sizebytes);
+
 	kfree(data);
 }
 
@@ -390,19 +391,20 @@ int hab_msg_recv(struct physical_channel *pchan,
 				session_id);
 			}
 			return -EINVAL;
-		} else if (vchan->otherend_closed) {
-			hab_vchan_put(vchan);
-			pr_info("vchan remote is closed payload type %d, vchan id %x, sizebytes %zx, session %d\n",
-				payload_type, vchan_id,
-				sizebytes, session_id);
-			if (sizebytes) {
-				hab_msg_drop(pchan, sizebytes);
-				pr_err("%s message %d dropped remote close, session id %d\n",
-				pchan->name, payload_type,
-				session_id);
+		} else
+			if (vchan->otherend_closed) {
+				hab_vchan_put(vchan);
+				pr_info("vc remote closed, msg type %d, vcid %x, sizebytes %zx, session %d\n",
+					payload_type, vchan_id,
+					sizebytes, session_id);
+				if (sizebytes) {
+					hab_msg_drop(pchan, sizebytes);
+					pr_err("%s message %d dropped remote close, session id %d\n",
+					pchan->name, payload_type,
+					session_id);
+				}
+				return -ENODEV;
 			}
-			return -ENODEV;
-		}
 	} else {
 		if (sizebytes != sizeof(struct hab_open_send_data)) {
 			pr_err("%s Invalid open req type %d vcid %x bytes %zx session %d\n",
@@ -529,8 +531,10 @@ int hab_msg_recv(struct physical_channel *pchan,
 			break;
 		}
 
-		hab_export_enqueue(vchan, exp_desc);
-		hab_send_export_ack(vchan, pchan, exp_desc);
+		(void)hab_export_enqueue(vchan, exp_desc);
+
+		(void)hab_send_export_ack(vchan, pchan, exp_desc);
+
 		break;
 
 	case HAB_PAYLOAD_TYPE_EXPORT_ACK:

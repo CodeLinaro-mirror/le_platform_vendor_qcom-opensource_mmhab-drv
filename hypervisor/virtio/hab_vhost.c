@@ -124,7 +124,7 @@ static char hab_area_names[HABCFG_MMID_AREA_MAX + 1][HAB_AREA_NAME_MAX] = {
 	[MM_EXT_START /100] = "ext"
 };
 
-static int rx_worker(struct vhost_hab_pchannel *vh_pchan);
+static void rx_worker(struct vhost_hab_pchannel *vh_pchan);
 
 static void stat_worker(struct work_struct *work);
 
@@ -321,6 +321,7 @@ static int vhost_hab_open(struct inode *inode, struct file *f)
 		if (!vh_pchan_found) {
 			pr_err("no vh_pchan is available for mmid %d\n",
 				habdev->id);
+			ret = -ENODEV;
 			goto err;
 		}
 	}
@@ -382,9 +383,9 @@ static void vhost_hab_stop(struct vhost_hab_dev *vh_dev)
 	struct vhost_hab_pchannel *vh_pchan;
 
 	list_for_each_entry(vh_pchan, &vh_dev->vh_pchan_list, node) {
-		vhost_hab_stop_vq(vh_dev,
+		(void)vhost_hab_stop_vq(vh_dev,
 				vh_pchan->vqs + VHOST_HAB_PCHAN_TX_VQ);
-		vhost_hab_stop_vq(vh_dev,
+		(void)vhost_hab_stop_vq(vh_dev,
 				vh_pchan->vqs + VHOST_HAB_PCHAN_RX_VQ);
 	}
 	vh_dev->started = 0;
@@ -726,7 +727,7 @@ static long vhost_hab_ioctl(struct file *f, unsigned int ioctl,
 		vhost_hab_flush(vh_dev);
 		mutex_unlock(&vh_dev->dev.mutex);
 		if (vhost_hab_ready_check(vh_dev) == 0)
-			vhost_hab_run(vh_dev, 1);
+			(void)vhost_hab_run(vh_dev, 1);
 
 		break;
 	}
@@ -979,7 +980,7 @@ static int rx_send_one_node_locked(struct vhost_dev *dev,
 	return ret;
 }
 
-static int rx_worker(struct vhost_hab_pchannel *vh_pchan)
+static void rx_worker(struct vhost_hab_pchannel *vh_pchan)
 {
 	struct vhost_hab_send_node *send_node;
 	struct vhost_virtqueue *vq = &vh_pchan->vqs[VHOST_HAB_PCHAN_RX_VQ];
@@ -1040,8 +1041,6 @@ err_unlock:
 		pr_warn("no avail buff on %s RX_VQ, retry\n", vh_pchan->pchan->name);
 		vhost_poll_queue(&vq->poll);
 	}
-
-	return 0;
 }
 
 int physical_channel_send(struct physical_channel *pchan,
@@ -1076,7 +1075,8 @@ int physical_channel_send(struct physical_channel *pchan,
 		return -ENOMEM;
 
 	send_node->header = *header;
-	memcpy(send_node->payload, payload, sizebytes);
+	if (sizebytes)
+		(void)memcpy(send_node->payload, payload, sizebytes);
 
 	mutex_lock(&vh_pchan->send_list_mutex);
 	list_add_tail(&send_node->node, &vh_pchan->send_list);
@@ -1113,9 +1113,8 @@ void physical_channel_rx_dispatch(unsigned long physical_channel)
 	struct physical_channel *pchan =
 			(struct physical_channel *)physical_channel;
 	struct vhost_hab_pchannel *vh_pchan = pchan->hyp_data;
-	struct vhost_virtqueue *vq = vh_pchan->vqs + VHOST_HAB_PCHAN_TX_VQ;
-	struct vhost_hab_dev *vh_dev = container_of(vq->dev,
-						struct vhost_hab_dev, dev);
+	struct vhost_virtqueue *vq;
+	struct vhost_hab_dev *vh_dev;
 
 	if (!vh_pchan) {
 		pr_err("pchan is not ready yet\n");
@@ -1199,8 +1198,9 @@ static void del_hab_device_from_cdev(uint32_t mmid, struct hab_device *habdev)
 	for (i = 0; i < HABCFG_MMID_NUM; i++) {
 		if (vh_cdev->habdevs[i] == habdev)
 			vh_cdev->habdevs[i] = NULL;
-		else if (vh_cdev->habdevs[i] != NULL)
-			destroy = false;
+		else
+			if (vh_cdev->habdevs[i] != NULL)
+				destroy = false;
 	}
 
 	/* if no habdev is on this cdev, destroy it */
@@ -1277,7 +1277,7 @@ int habhyp_commdev_alloc(void **commdev, int is_be, char *name,
 
 	pchan->closed = 0;
 	pchan->is_be = 1; /* vhost is always backend */
-	strscpy(pchan->name, name, sizeof(pchan->name));
+	(void)strscpy(pchan->name, name, sizeof(pchan->name));
 
 	pr_info("pchan on %s, loopback %d, total pchan %d, vmid %d\n",
 		name, hab_driver.b_loopback, habdev->pchan_cnt, vmid_remote);
@@ -1348,7 +1348,7 @@ int hab_stat_log(struct physical_channel **pchans, int pchan_cnt, char *dest,
 	stat_work.pchan_count = pchan_cnt;
 
 	INIT_WORK_ONSTACK(&stat_work.work, stat_worker);
-	queue_work(g_vh.wq, &stat_work.work);
+	(void)queue_work(g_vh.wq, &stat_work.work);
 	flush_workqueue(g_vh.wq);
 
 	destroy_work_on_stack(&stat_work.work);

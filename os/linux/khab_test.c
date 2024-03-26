@@ -144,17 +144,17 @@ int hab_stat_deinit_sub(struct hab_driver *driver)
 
 int dump_hab_get_file_name(char *file_time, int ft_size)
 {
-	struct timespec64 time = {0};
+	struct timespec64 ts = {0};
 	unsigned long local_time;
-	struct rtc_time tm;
+	struct rtc_time now;
 
-	ktime_get_real_ts64(&time);
-	local_time = (unsigned long)(time.tv_sec - sys_tz.tz_minuteswest * 60);
-	rtc_time64_to_tm(local_time, &tm);
+	ktime_get_real_ts64(&ts);
+	local_time = (unsigned long)(ts.tv_sec - sys_tz.tz_minuteswest * 60);
+	rtc_time64_to_tm(local_time, &now);
 
-	snprintf(file_time, ft_size, "%04d_%02d_%02d-%02d_%02d_%02d",
-		tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour,
-		tm.tm_min, tm.tm_sec);
+	(void)snprintf(file_time, ft_size, "%04d_%02d_%02d-%02d_%02d_%02d",
+		now.tm_year + 1900, now.tm_mon + 1, now.tm_mday, now.tm_hour,
+		now.tm_min, now.tm_sec);
 
 	return 0;
 }

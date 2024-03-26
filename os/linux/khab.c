@@ -54,19 +54,19 @@ int32_t habmm_socket_recv(int32_t handle, void *dst_buff, uint32_t *size_bytes,
 
 			/* The maximum size of msg is limited in hab_msg_alloc*/
 			for (i = 0; i < msg->sizebytes / PAGE_SIZE; i++)
-				memcpy((char *)((uint64_t)dst_buff
+				(void)memcpy((char *)((uint64_t)dst_buff
 					+ (uint64_t)(i * PAGE_SIZE)), scatter_buf[i], PAGE_SIZE);
 
 			if (msg->sizebytes % PAGE_SIZE)
-				memcpy((char *)((uint64_t)dst_buff
+				(void)memcpy((char *)((uint64_t)dst_buff
 					+ (uint64_t)(i * PAGE_SIZE)), scatter_buf[i],
 					msg->sizebytes % PAGE_SIZE);
 		} else
-			memcpy(dst_buff, msg->data, msg->sizebytes);
-	} else if (ret && msg) {
-		pr_warn("vcid %X recv failed %d but msg is still received %zd bytes\n",
+			(void)memcpy(dst_buff, msg->data, msg->sizebytes);
+	} else
+		if (ret && msg)
+			pr_warn("vcid %X recv failed %d but msg is still received %zd bytes\n",
 				handle, ret, msg->sizebytes);
-	}
 
 	if (msg)
 		hab_msg_free(msg);
@@ -157,11 +157,11 @@ int32_t habmm_socket_query(int32_t handle,
 
 	ret = hab_vchan_query(hab_driver.kctx, handle, &ids, nm, sizeof(nm), 1);
 	if (!ret) {
-		info->vmid_local = ids & 0xFFFFFFFF;
+		info->vmid_local = ids & 0xFFFFFFFFU;
 		info->vmid_remote = (ids & 0xFFFFFFFF00000000UL) > 32;
 
-		strscpy(info->vmname_local, nm, sizeof(info->vmname_local));
-		strscpy(info->vmname_remote, &nm[sizeof(info->vmname_local)],
+		(void)strscpy(info->vmname_local, nm, sizeof(info->vmname_local));
+		(void)strscpy(info->vmname_remote, &nm[sizeof(info->vmname_local)],
 			sizeof(info->vmname_remote));
 	}
 	return ret;
