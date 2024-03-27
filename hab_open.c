@@ -167,8 +167,9 @@ int hab_open_listen(struct uhab_context *ctx,
 		} else if (hab_is_forbidden(ctx, dev, listen->xdata.sub_id)) {
 			pr_info("local open cancelled ret %d\n", ret);
 			ret = -ENXIO;
-		} else if (ret > 0)
-			ret = 0; /* condition met */
+		} else
+			if (ret > 0)
+				ret = 0; /* condition met */
 	} else {
 		ret = wait_event_interruptible(dev->openq,
 			hab_open_request_find(ctx, dev, listen, recv_request));
@@ -178,10 +179,11 @@ int hab_open_listen(struct uhab_context *ctx,
 		} else if (-ERESTARTSYS == ret) {
 			pr_warn("local interrupted ret %d\n", ret);
 			ret = -EINTR;
-		} else if (hab_is_forbidden(ctx, dev, listen->xdata.sub_id)) {
-			pr_info("local open cancelled ret %d\n", ret);
-			ret = -ENXIO;
-		}
+		} else
+			if (hab_is_forbidden(ctx, dev, listen->xdata.sub_id)) {
+				pr_info("local open cancelled ret %d\n", ret);
+				ret = -ENXIO;
+			}
 	}
 
 	return ret;

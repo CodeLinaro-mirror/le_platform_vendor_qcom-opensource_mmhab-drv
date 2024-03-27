@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022, 2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 #include "hab.h"
 #include <linux/fdtable.h>
@@ -62,12 +62,12 @@ static int hab_page_is_valid(unsigned long pfn)
 }
 
 static struct pages_list *pages_list_create(
-	struct export_desc *exp,
+	struct export_desc *export,
 	uint32_t userflags)
 {
 	struct page **pages = NULL;
 	struct compressed_pfns *pfn_table =
-		(struct compressed_pfns *)exp->payload;
+		(struct compressed_pfns *)export->payload;
 	struct pages_list *pglist = NULL;
 	unsigned long pfn;
 	int i, j, k = 0, size;
@@ -80,11 +80,11 @@ static struct pages_list *pages_list_create(
 	if (pfn_valid(pfn) == 0 || hab_page_is_valid(pfn) == 0) {
 		pr_err("imp sanity failed pfn %lx valid %d ram %d pchan %s\n",
 			pfn, pfn_valid(pfn),
-			page_is_ram(pfn), exp->pchan->name);
+			page_is_ram(pfn), export->pchan->name);
 		return ERR_PTR(-EINVAL);
 	}
 
-	size = exp->payload_count * sizeof(struct page *);
+	size = export->payload_count * sizeof(struct page *);
 	pages = vmalloc(size);
 	if (!pages)
 		return ERR_PTR(-ENOMEM);
@@ -103,9 +103,9 @@ static struct pages_list *pages_list_create(
 		}
 
 		region_total_page += pfn_table->region[i].size;
-		if (region_total_page > exp->payload_count) {
+		if (region_total_page > export->payload_count) {
 			pr_err("payload_count %d but region_total_page %lu\n",
-				exp->payload_count, region_total_page);
+				export->payload_count, region_total_page);
 			goto err_region_total_page;
 		}
 
@@ -115,18 +115,18 @@ static struct pages_list *pages_list_create(
 		}
 		pfn += pfn_table->region[i].size + pfn_table->region[i].space;
 	}
-	if (region_total_page != exp->payload_count) {
+	if (region_total_page != export->payload_count) {
 		pr_err("payload_count %d and region_total_page %lu are not equal\n",
-			exp->payload_count, region_total_page);
+			export->payload_count, region_total_page);
 		goto err_region_total_page;
 	}
 
 	pglist->pages = pages;
-	pglist->npages = exp->payload_count;
+	pglist->npages = export->payload_count;
 	pglist->userflags = userflags;
-	pglist->export_id = exp->export_id;
-	pglist->vcid = exp->vcid_remote;
-	pglist->pchan = exp->pchan;
+	pglist->export_id = export->export_id;
+	pglist->vcid = export->vcid_remote;
+	pglist->pchan = export->pchan;
 
 	kref_init(&pglist->refcount);
 
@@ -178,9 +178,9 @@ static void pages_list_get(struct pages_list *pglist)
 	kref_get(&pglist->refcount);
 }
 
-static int pages_list_put(struct pages_list *pglist)
+static void pages_list_put(struct pages_list *pglist)
 {
-	return kref_put(&pglist->refcount, pages_list_destroy);
+	(void)kref_put(&pglist->refcount, pages_list_destroy);
 }
 
 static struct pages_list *pages_list_lookup(
@@ -450,7 +450,7 @@ static int habmem_add_export_compress(struct virtual_channel *vchan,
 		int *export_id)
 {
 	int ret = 0;
-	struct export_desc *exp = NULL;
+	struct export_desc *export = NULL;
 	struct export_desc_super *exp_super = NULL;
 	struct exp_platform_data *platform_data = NULL;
 	struct compressed_pfns *pfns = NULL;
@@ -478,14 +478,14 @@ static int habmem_add_export_compress(struct virtual_channel *vchan,
 		goto err_alloc;
 	}
 
-	exp = &exp_super->exp;
-	exp->payload_count = page_count;
+	export = &exp_super->exp;
+	export->payload_count = page_count;
 	platform_data->dmabuf = buf;
 	exp_super->offset = offset;
 	exp_super->platform_data = (void *)platform_data;
 	kref_init(&exp_super->refcount);
 
-	pfns = (struct compressed_pfns *)&exp->payload[0];
+	pfns = (struct compressed_pfns *)&export->payload[0];
 	ret = habmem_compress_pfns(exp_super, pfns, payload_size);
 	if (ret) {
 		pr_err("hab compressed pfns failed %d\n", ret);
@@ -493,15 +493,15 @@ static int habmem_add_export_compress(struct virtual_channel *vchan,
 		goto err_compress_pfns;
 	}
 
-	*export_id = exp->export_id;
+	*export_id = export->export_id;
 	return 0;
 
 err_compress_pfns:
 	kfree(platform_data);
 err_alloc:
-	spin_lock(&exp->pchan->expid_lock);
-	idr_remove(&exp->pchan->expid_idr, exp->export_id);
-	spin_unlock(&exp->pchan->expid_lock);
+	spin_lock(&export->pchan->expid_lock);
+	(void)idr_remove(&vchan->pchan->expid_idr, export->export_id);
+	spin_unlock(&export->pchan->expid_lock);
 	vfree(exp_super);
 err_add_exp:
 	dma_buf_put((struct dma_buf *)buf);
@@ -923,18 +923,18 @@ static struct dma_buf_ops dma_buf_ops = {
 
 static struct dma_buf *habmem_import_to_dma_buf(
 	struct physical_channel *pchan,
-	struct export_desc *exp,
+	struct export_desc *export,
 	uint32_t userflags)
 {
 	struct pages_list *pglist = NULL;
 	struct dma_buf *dmabuf = NULL;
 	DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
 
-	pglist = pages_list_lookup(exp->export_id, pchan, true);
+	pglist = pages_list_lookup(export->export_id, pchan, true);
 	if (pglist)
 		goto buffer_ready;
 
-	pglist = pages_list_create(exp, userflags);
+	pglist = pages_list_create(export, userflags);
 	if (IS_ERR(pglist))
 		return (void *)pglist;
 
@@ -949,7 +949,7 @@ buffer_ready:
 	dmabuf = dma_buf_export(&exp_info);
 	if (IS_ERR(dmabuf)) {
 		pr_err("export to dmabuf failed, exp %d, pchan %s\n",
-			exp->export_id, pchan->name);
+			export->export_id, pchan->name);
 		pages_list_put(pglist);
 	}
 
@@ -957,13 +957,13 @@ buffer_ready:
 }
 
 int habmem_imp_hyp_map(void *imp_ctx, struct hab_import *param,
-		struct export_desc *exp, int kernel)
+		struct export_desc *export, int kernel)
 {
 	int fd = -1;
 	struct dma_buf *dma_buf = NULL;
-	struct physical_channel *pchan = exp->pchan;
+	struct physical_channel *pchan = export->pchan;
 
-	dma_buf = habmem_import_to_dma_buf(pchan, exp, param->flags);
+	dma_buf = habmem_import_to_dma_buf(pchan, export, param->flags);
 	if (IS_ERR_OR_NULL(dma_buf))
 		return -EINVAL;
 
@@ -981,11 +981,11 @@ int habmem_imp_hyp_map(void *imp_ctx, struct hab_import *param,
 	return 0;
 }
 
-int habmm_imp_hyp_unmap(void *imp_ctx, struct export_desc *exp, int kernel)
+int habmm_imp_hyp_unmap(void *imp_ctx, struct export_desc *export, int kernel)
 {
 	/* dma_buf is the only supported format in khab */
 	if (kernel)
-		dma_buf_put((struct dma_buf *)exp->kva);
+		dma_buf_put((struct dma_buf *)export->kva);
 	return 0;
 }
 
@@ -994,12 +994,12 @@ int habmem_imp_hyp_mmap(struct file *filp, struct vm_area_struct *vma)
 	return -EFAULT;
 }
 
-int habmm_imp_hyp_map_check(void *imp_ctx, struct export_desc *exp)
+int habmm_imp_hyp_map_check(void *imp_ctx, struct export_desc *export)
 {
 	struct pages_list *pglist = NULL;
 	int found = 0;
 
-	pglist = pages_list_lookup(exp->export_id, exp->pchan, false);
+	pglist = pages_list_lookup(export->export_id, export->pchan, false);
 	if (pglist)
 		found = 1;
 

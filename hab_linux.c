@@ -244,6 +244,7 @@ static long hab_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 		break;
 	default:
 		ret = -ENOIOCTLCMD;
+		break;
 	}
 
 	if (_IOC_SIZE(cmd) && (cmd & IOC_OUT))
@@ -308,6 +309,9 @@ static int hab_power_down_callback(
 		pr_debug("reboot called %ld\n", action);
 		hab_hypervisor_unregister(); /* only for single VM guest */
 		break;
+	default:
+		pr_debug("unspported action: %ld\n", action);
+		break;
 	}
 	pr_debug("reboot called %ld done\n", action);
 	return NOTIFY_DONE;
@@ -321,6 +325,7 @@ static int __init hab_init(void)
 {
 	int result;
 	dev_t dev;
+	struct device *device = NULL;
 
 	result = alloc_chrdev_region(&hab_driver.major, 0, 1, "hab");
 
@@ -349,8 +354,9 @@ static int __init hab_init(void)
 		goto err;
 	}
 
-	hab_driver.dev = device_create(hab_driver.class, NULL,
+	device = device_create(hab_driver.class, NULL,
 					dev, &hab_driver, "hab");
+	hab_driver.dev = device;
 
 	if (IS_ERR(hab_driver.dev)) {
 		result = PTR_ERR(hab_driver.dev);
@@ -387,7 +393,8 @@ static int __init hab_init(void)
 			}
 		}
 	}
-	hab_stat_init(&hab_driver);
+	(void)hab_stat_init(&hab_driver);
+
 	return result;
 
 err:
@@ -407,14 +414,14 @@ static void __exit hab_exit(void)
 	dev_t dev;
 
 	hab_hypervisor_unregister();
-	hab_stat_deinit(&hab_driver);
+	(void)hab_stat_deinit(&hab_driver);
 	hab_ctx_put(hab_driver.kctx);
 	dev = MKDEV(MAJOR(hab_driver.major), 0);
 	device_destroy(hab_driver.class, dev);
 	class_destroy(hab_driver.class);
 	cdev_del(&hab_driver.cdev);
 	unregister_chrdev_region(dev, 1);
-	unregister_reboot_notifier(&hab_reboot_notifier);
+	(void)unregister_reboot_notifier(&hab_reboot_notifier);
 	pr_debug("hab exit called\n");
 }
 

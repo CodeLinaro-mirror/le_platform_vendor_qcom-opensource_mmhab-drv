@@ -134,7 +134,7 @@ struct hab_header {
  */
 #define HAB_HEADER_SIZE_MAX  0x0007D000
 #define HAB_HEADER_TYPE_MASK 0x000F0000
-#define HAB_HEADER_ID_MASK   0xFFF00000
+#define HAB_HEADER_ID_MASK   0xFFF00000U
 #define HAB_HEADER_INITIALIZER {0}
 
 #define HAB_MMID_GET_MAJOR(mmid) (mmid & 0xFFFF)
@@ -145,7 +145,7 @@ struct hab_header {
 #define HAB_VCID_MMID_SHIFT 20
 #define HAB_VCID_ID_MASK 0x00000FFF
 #define HAB_VCID_DOMID_MASK 0x000FF000
-#define HAB_VCID_MMID_MASK 0xFFF00000
+#define HAB_VCID_MMID_MASK 0xFFF00000U
 #define HAB_VCID_GET_ID(vcid) \
 	(((vcid) & HAB_VCID_ID_MASK) >> HAB_VCID_ID_SHIFT)
 
@@ -182,7 +182,7 @@ struct hab_header {
 #define HAB_HEADER_GET_SESSION_ID(header) ((header).session_id)
 
 #define HAB_HS_TIMEOUT (10*1000*1000)
-#define HAB_HEAD_SIGNATURE 0xBEE1BEE1
+#define HAB_HEAD_SIGNATURE 0xBEE1BEE1U
 
 struct physical_channel {
 	struct list_head node;
@@ -451,7 +451,7 @@ int hab_mem_import(struct uhab_context *ctx,
 int hab_mem_unexport(struct uhab_context *ctx,
 		struct hab_unexport *param, int kernel);
 void habmem_export_get(struct export_desc_super *exp_super);
-int habmem_export_put(struct export_desc_super *exp_super);
+void habmem_export_put(struct export_desc_super *exp_super);
 
 int hab_mem_unimport(struct uhab_context *ctx,
 		struct hab_unimport *param, int kernel);
@@ -551,7 +551,7 @@ static inline void hab_ctx_get(struct uhab_context *ctx)
 static inline void hab_ctx_put(struct uhab_context *ctx)
 {
 	if (ctx)
-		kref_put(&ctx->refcount, hab_ctx_free);
+		(void)kref_put(&ctx->refcount, hab_ctx_free);
 }
 
 void hab_send_close_msg(struct virtual_channel *vchan);

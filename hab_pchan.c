@@ -95,5 +95,5 @@ void hab_pchan_get(struct physical_channel *pchan)
 void hab_pchan_put(struct physical_channel *pchan)
 {
 	if (pchan)
-		kref_put(&pchan->refcount, hab_pchan_free);
+		(void)kref_put(&pchan->refcount, hab_pchan_free);
 }

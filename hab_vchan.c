@@ -144,17 +144,18 @@ hab_vchan_get(struct physical_channel *pchan, struct hab_header *header)
 				vchan->session_id, get_refcnt(vchan->refcount),
 				vchan_id, session_id, payload_type, sizebytes);
 			vchan = NULL;
-		} else if (!kref_get_unless_zero(&vchan->refcount)) {
-			/*
-			 * this happens when refcnt is already zero
-			 * (put from other thread) or there is an actual error
-			 */
-			pr_err("failed to inc vcid %pK %x remote %x session %d refcnt %d header %x session %d type %d sz %zd\n",
-				vchan, vchan->id, vchan->otherend_id,
-				vchan->session_id, get_refcnt(vchan->refcount),
-				vchan_id, session_id, payload_type, sizebytes);
-			vchan = NULL;
-		}
+		} else
+			if (!kref_get_unless_zero(&vchan->refcount)) {
+				/*
+				 * this happens when refcnt is already zero
+				 * (put from other thread) or there is an actual error
+				 */
+				pr_err("failed to inc vcid %pK %x remote %x session %d refcnt %d header %x session %d type %d sz %zd\n",
+					vchan, vchan->id, vchan->otherend_id,
+					vchan->session_id, get_refcnt(vchan->refcount),
+					vchan_id, session_id, payload_type, sizebytes);
+				vchan = NULL;
+			}
 	}
 	hab_spin_unlock(&pchan->vid_lock, irqs_disabled);
 
@@ -283,7 +284,7 @@ int hab_vchan_find_domid(struct virtual_channel *vchan)
 void hab_vchan_put(struct virtual_channel *vchan)
 {
 	if (vchan)
-		kref_put(&vchan->refcount, hab_vchan_free);
+		(void)kref_put(&vchan->refcount, hab_vchan_free);
 }
 
 int hab_vchan_query(struct uhab_context *ctx, int32_t vcid, uint64_t *ids,
