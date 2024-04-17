@@ -19,7 +19,7 @@ void hab_open_request_init(struct hab_open_request *request,
 	request->xdata.vchan_id = vchan_id;
 	request->xdata.sub_id = sub_id;
 	request->xdata.open_id = open_id;
-	request->xdata.reserved = 0;
+	request->xdata.ver_proto = HAB_VER_PROT;
 }
 
 int hab_open_request_send(struct hab_open_request *request)

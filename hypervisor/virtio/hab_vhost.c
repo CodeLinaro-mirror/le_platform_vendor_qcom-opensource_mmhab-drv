@@ -216,8 +216,8 @@ static void tx_worker(struct vhost_hab_pchannel *vh_pchan)
 
 			trace_hab_pchan_recv_start(vh_pchan->pchan);
 			ret = hab_msg_recv(vh_pchan->pchan, &header);
-			if (ret)
-				pr_err("hab_msg_recv error %d\n", ret);
+			if (ret && (ret != -EINVAL))
+				pr_err("hab_msg_recv error %d on %s\n", ret, vh_pchan->pchan->name);
 
 			total_len += out_len;
 			if (vh_pchan->pchan->sequence_rx + 1 != header.sequence)
