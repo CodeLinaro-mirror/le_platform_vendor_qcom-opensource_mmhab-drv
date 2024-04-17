@@ -31,7 +31,7 @@ static int fill_vmid_mmid_tbl(struct vmid_mmid_desc *tbl, int32_t vm_start,
 	return 0;
 }
 
-void dump_settings(struct local_vmid *settings)
+static void dump_settings(struct local_vmid *settings)
 {
 	pr_debug("self vmid is %d\n", settings->self);
 }
