@@ -222,6 +222,13 @@ struct physical_channel {
 	char vmname_remote[12];
 	int closed;
 
+	/*
+	 * other end is not connected to this pchan, and the state is 0/connected
+	 * by default, keeps as connected when the remote actually is up,
+	 * disconnects when the remote is gone away, and so on
+	 */
+	int otherend_closed;
+
 	spinlock_t rxbuf_lock;
 
 	/* debug only */

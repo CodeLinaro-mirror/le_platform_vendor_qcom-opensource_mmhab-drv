@@ -567,8 +567,10 @@ static long vhost_hab_reset_owner(struct vhost_hab_dev *vh_dev)
 
 	/* stop All vchans of a given vhost-dev (Eg Audio/video etc) */
 	list_for_each_entry(vh_pchan, &vh_dev->vh_pchan_list, node) {
-		if (vh_pchan)
+		if (vh_pchan) {
 			hab_vchans_stop(vh_pchan->pchan);
+			vh_pchan->pchan->otherend_closed = 1;
+		}
 	}
 
 	/* hab driver is expecting BEs to close all the vchans */
@@ -634,6 +636,7 @@ static int vhost_hab_set_pchannels(struct vhost_hab_dev *vh_dev, int vmid)
 		}
 
 		vh_pchan->pchan = pchan;
+		pchan->otherend_closed = 0;
 		pchan->hyp_data = vh_pchan;
 	}
 
@@ -1052,10 +1055,8 @@ static void rx_worker(struct vhost_hab_pchannel *vh_pchan)
 
 err_unlock:
 	mutex_unlock(&vq->mutex);
-	if (ret == -EAGAIN) {
-		pr_warn("no avail buff on %s RX_VQ, retry\n", vh_pchan->pchan->name);
-		vhost_poll_queue(&vq->poll);
-	}
+	if (ret == -EAGAIN)
+		pr_warn("no avail buff on %s RX_VQ, wait...\n", vh_pchan->pchan->name);
 }
 
 int physical_channel_send(struct physical_channel *pchan,
@@ -1070,6 +1071,13 @@ int physical_channel_send(struct physical_channel *pchan,
 
 	if (!vh_pchan) {
 		pr_err("pchan is not ready yet\n");
+		return -ENODEV;
+	}
+
+	/* return -ENODEV similarly as when vchan is closed */
+	if (pchan->otherend_closed == 1) {
+		pr_debug("pchan %s was closed, data write is not allowed\n",
+			pchan->name);
 		return -ENODEV;
 	}
 
