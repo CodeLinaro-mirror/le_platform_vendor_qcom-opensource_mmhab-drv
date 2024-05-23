@@ -78,7 +78,7 @@ struct uhab_context *hab_ctx_alloc(int kernel)
 	ctx->closing = 0;
 	INIT_LIST_HEAD(&ctx->vchannels);
 	INIT_LIST_HEAD(&ctx->exp_whse);
-	INIT_LIST_HEAD(&ctx->imp_whse);
+	hab_rb_init(&ctx->imp_whse);
 
 	INIT_LIST_HEAD(&ctx->exp_rxq);
 	init_waitqueue_head(&ctx->exp_wq);
@@ -166,7 +166,7 @@ void hab_ctx_free(struct kref *ref)
 
 			pchan = export->pchan;
 			hab_spin_lock(&pchan->expid_lock, irqs_disabled);
-			idr_remove(&pchan->expid_idr, export->export_id);
+			(void)idr_remove(&pchan->expid_idr, export->export_id);
 			hab_spin_unlock(&pchan->expid_lock, irqs_disabled);
 
 			habmem_remove_export(export);
@@ -176,8 +176,11 @@ void hab_ctx_free(struct kref *ref)
 	write_unlock(&ctx->exp_lock);
 
 	spin_lock_bh(&ctx->imp_lock);
-	list_for_each_entry_safe(export, exp_tmp, &ctx->imp_whse, node) {
-		list_del(&export->node);
+	for (exp_super = hab_rb_min(&ctx->imp_whse, struct export_desc_super, node);
+	     exp_super != NULL;
+	     exp_super = hab_rb_min(&ctx->imp_whse, struct export_desc_super, node)) {
+		export = &exp_super->exp;
+		hab_rb_remove(&ctx->imp_whse, exp_super);
 		ctx->import_total--;
 		pr_debug("leaked imp %d vcid %X for ctx is collected total %d\n",
 			export->export_id, export->vcid_local,

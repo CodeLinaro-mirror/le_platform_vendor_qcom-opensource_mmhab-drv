@@ -120,6 +120,7 @@ static int print_ctx_total_expimp(struct uhab_context *ctx,
 	int exp_total = 0, imp_total = 0;
 	int exp_cnt = 0, imp_cnt = 0;
 	struct export_desc *export = NULL;
+	struct export_desc_super *exp_super, *exp_super_tmp;
 	int exim_size = 0;
 	int ret = 0;
 
@@ -133,7 +134,8 @@ static int print_ctx_total_expimp(struct uhab_context *ctx,
 	read_unlock(&ctx->exp_lock);
 
 	spin_lock_bh(&ctx->imp_lock);
-	list_for_each_entry(export, &ctx->imp_whse, node) {
+	hab_rb_for_each_entry(exp_super, exp_super_tmp, &ctx->imp_whse, node) {
+		export = &exp_super->exp;
 		if (habmm_imp_hyp_map_check(ctx->import_ctx, export)) {
 			pfn_table =	(struct compressed_pfns *)export->payload;
 			exim_size = get_pft_tbl_total_size(pfn_table);
@@ -165,7 +167,8 @@ static int print_ctx_total_expimp(struct uhab_context *ctx,
 
 	spin_lock_bh(&ctx->imp_lock);
 	ret = hab_stat_buffer_print(buf, size, "import[expid:vcid:size]: ");
-	list_for_each_entry(export, &ctx->imp_whse, node) {
+	hab_rb_for_each_entry(exp_super, exp_super_tmp, &ctx->imp_whse, node) {
+		export = &exp_super->exp;
 		if (habmm_imp_hyp_map_check(ctx->import_ctx, export)) {
 			pfn_table =	(struct compressed_pfns *)export->payload;
 			exim_size = get_pft_tbl_total_size(pfn_table);

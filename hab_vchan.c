@@ -95,7 +95,7 @@ hab_vchan_free(struct kref *ref)
 
 	/* release idr at the last so same idr will not be used early */
 	hab_spin_lock(&pchan->vid_lock, irqs_disabled);
-	idr_remove(&pchan->vchan_idr, HAB_VCID_GET_ID(vchan->id));
+	(void)idr_remove(&pchan->vchan_idr, HAB_VCID_GET_ID(vchan->id));
 	hab_spin_unlock(&pchan->vid_lock, irqs_disabled);
 
 	hab_pchan_put(pchan); /* no more need for pchan from this vchan */
