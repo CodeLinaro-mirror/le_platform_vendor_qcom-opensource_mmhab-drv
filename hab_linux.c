@@ -321,6 +321,34 @@ static struct notifier_block hab_reboot_notifier = {
 	.notifier_call = hab_power_down_callback,
 };
 
+static void reclaim_cleanup(struct work_struct *reclaim_work)
+{
+	struct export_desc *export = NULL, *exp_tmp = NULL;
+	struct export_desc_super *exp_super = NULL;
+	struct physical_channel *pchan = NULL;
+	LIST_HEAD(free_list);
+
+	pr_debug("reclaim worker called\n");
+	spin_lock(&hab_driver.reclaim_lock);
+	list_for_each_entry_safe(export, exp_tmp, &hab_driver.reclaim_list, node) {
+		exp_super = container_of(export, struct export_desc_super, exp);
+		if (exp_super->remote_imported == 0)
+			list_move(&export->node, &free_list);
+	}
+	spin_unlock(&hab_driver.reclaim_lock);
+
+	list_for_each_entry_safe(export, exp_tmp, &free_list, node) {
+		list_del(&export->node);
+		exp_super = container_of(export, struct export_desc_super, exp);
+		pchan = export->pchan;
+		spin_lock_bh(&pchan->expid_lock);
+		idr_remove(&pchan->expid_idr, export->export_id);
+		spin_unlock_bh(&pchan->expid_lock);
+		pr_info("cleanup exp id %u from %s\n", export->export_id, pchan->name);
+		habmem_export_put(exp_super);
+	}
+}
+
 static int __init hab_init(void)
 {
 	int result;
@@ -367,6 +395,8 @@ static int __init hab_init(void)
 	result = register_reboot_notifier(&hab_reboot_notifier);
 	if (result)
 		pr_err("failed to register reboot notifier %d\n", result);
+
+	INIT_WORK(&hab_driver.reclaim_work, reclaim_cleanup);
 
 	/* read in hab config, then configure pchans */
 	result = do_hab_parse();
