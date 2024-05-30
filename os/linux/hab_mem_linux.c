@@ -277,7 +277,11 @@ static struct dma_buf *habmem_get_dma_buf_from_uva(unsigned long address,
 
 	mmap_read_lock(current->mm);
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0))
+        ret = get_user_pages(address, page_count, 0, pages);
+#else
 	ret = get_user_pages(address, page_count, 0, pages, NULL);
+#endif
 
 	mmap_read_unlock(current->mm);
 
@@ -858,11 +862,13 @@ static int hab_mem_mmap(struct dma_buf *dmabuf, struct vm_area_struct *vma)
 	/* Check for valid size. */
 	if (obj_size < vma->vm_end - vma->vm_start)
 		return -EINVAL;
-
-	vma->vm_flags |= VM_IO | VM_PFNMAP | VM_DONTEXPAND | VM_DONTDUMP;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+	vm_flags_set(vma, VM_IO | VM_PFNMAP | VM_DONTEXPAND | VM_DONTDUMP | VM_MIXEDMAP);
+#else
+	vma->vm_flags |= VM_IO | VM_PFNMAP | VM_DONTEXPAND | VM_DONTDUMP | VM_MIXEDMAP;
+#endif
 	vma->vm_ops = &hab_buffer_vm_ops;
 	vma->vm_private_data = pglist;
-	vma->vm_flags |= VM_MIXEDMAP;
 
 	if (!(pglist->userflags & HABMM_IMPORT_FLAGS_CACHED))
 		vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
