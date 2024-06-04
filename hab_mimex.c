@@ -492,12 +492,15 @@ int hab_mem_import(struct uhab_context *ctx,
 	spin_lock_bh(&ctx->imp_lock);
 	exp_super = hab_rb_exp_find(&ctx->imp_whse, &key);
 	if (exp_super) {
-		/* not allowed to import one exp desc more than once */
-		if (exp_super->import_state == EXP_DESC_IMPORTED
-			|| exp_super->import_state == EXP_DESC_IMPORTING) {
+		/*
+		 * INIT is the only valid state for import to begin with to block below cases
+		 * 1. import the same exp id twice sequentially in old memory protocol
+		 * 2. two threads import race in old memory protocol
+		 */
+		if (exp_super->import_state != EXP_DESC_INIT) {
 			export = &exp_super->exp;
-			pr_err("vc %x not allowed to import one expid %u more than once\n",
-					vchan->id, export->export_id);
+			pr_err("vc %x not allowed to import one expid %u, state: %d\n",
+					vchan->id, export->export_id, exp_super->import_state);
 			spin_unlock_bh(&ctx->imp_lock);
 			ret = -EINVAL;
 			goto err_imp;
@@ -586,10 +589,13 @@ int hab_mem_unimport(struct uhab_context *ctx,
 	spin_lock_bh(&ctx->imp_lock);
 	exp_super = hab_rb_exp_find(&ctx->imp_whse, &key);
 	if (exp_super) {
-		/* only successfully imported export desc could be found and released */
+		/*
+		 * IMPORTED is the only valid state for unimport to begin with to block below cases
+		 * 1. two threads import & unimport race
+		 * 2. two threads unimport race
+		 */
 		if (exp_super->import_state == EXP_DESC_IMPORTED) {
-			hab_rb_remove(&ctx->imp_whse, exp_super);
-			ctx->import_total--;
+			exp_super->import_state = EXP_DESC_UNIMPORTING;
 			found = 1;
 		} else
 			pr_err("vc %x exp id:%u status:%d is found, invalid to unimport\n",
@@ -604,13 +610,20 @@ int hab_mem_unimport(struct uhab_context *ctx,
 		export = &exp_super->exp;
 		ret = habmm_imp_hyp_unmap(ctx->import_ctx, export, kernel);
 		if (ret) {
-			pr_err("unmap fail id:%d pcnt:%d vcid:%d\n",
-			export->export_id, export->payload_count, export->vcid_remote);
+			pr_err("unmap fail id:%d pcnt:%d vcid:%x, vcid-rmt: %x\n",
+			export->export_id, export->payload_count, vchan->id, export->vcid_remote);
+			exp_super->import_state = EXP_DESC_IMPORTED;
+		} else {
+			param->kva = (uint64_t)export->kva;
+			if (vchan->pchan->mem_proto == 1)
+				hab_send_unimport_msg(vchan, export->export_id);
+
+			spin_lock_bh(&ctx->imp_lock);
+			hab_rb_remove(&ctx->imp_whse, exp_super);
+			ctx->import_total--;
+			spin_unlock_bh(&ctx->imp_lock);
+			kfree(exp_super);
 		}
-		param->kva = (uint64_t)export->kva;
-		if (vchan->pchan->mem_proto == 1)
-			hab_send_unimport_msg(vchan, export->export_id);
-		kfree(exp_super);
 	}
 
 	if (vchan)

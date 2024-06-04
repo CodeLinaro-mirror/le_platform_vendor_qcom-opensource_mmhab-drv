@@ -466,44 +466,65 @@ struct export_desc {
 } __packed;
 
 /*
- * hab_mem_import       hab_mem_unimport
- * --------------       ----------------
- *      lock                 lock
- *      query                query
- *      unlock               unlock
+ * hab_mem_import       hab_mem_unimport       hab_msg
+ * --------------       ----------------       -------
+ *      lock                 lock               lock
+ *      query/find           query/find         insert
+ *      unlock               unlock             unlock
  *
- *      use                  free
+ *      use                  lock
+ *                           remove
+ *                           unlock
+ *                           free
  *
  *      ret                  ret
  *
- * There are three scenarios to handle.
- * First is:
+ * There are 4 types of competition scenarios to be handled.
+ * #1:
  * 1.thread1 enters import and finds out the exp desc, then unlock,
  * 2.thread2 is scheduled to run on the same CPU,
  * 3.it enters unimport, finds out the same exp desc, frees it and returns,
  * 4.cpu is back to run thread1,
  * 5.UAF occurs once thread1 uses this exp desc.
- * We could use EXP_DESC_IMPORTED at the end of import and add query check
- * in unimport to sync this access.
- * A more complicated case is:
+ * Above UAF could be fixed by setting EXP_DESC_IMPORTED at the end of import
+ * and perform sanity check in unimport.
+ *
+ * #2: (old memory sharing protocol only)
  * 1.thread1 has completed the import,
  * 2.thread2 enters import and gets the exp desc,
  * 3.at this time point, thread3 which calls unimport could find out this
  * exp desc due to its current state is EXP_DESC_IMPORTED,
  * 4.if thread3 frees it, thread2 uses it afterward, will also occur UAF.
- * Add query check with EXP_DESC_IMPORTED in import could avoid this,
- * but it can not deal with the 3rd scenario:
- * 1.thread1 and thread2 call import and both find out this exp desc,
+ * Adding EXP_DESC_IMPORTED sanity check in import could avoid this.
+ * However, in new memory protocol, multiple imports for the same exp id won't work.
+ * Only the first exp node arrives can be accepted. Others will be rejected in hab_msg.
+ *
+ * #3: (old memory sharing protocol only)
+ * 1.thread1 and thread2 call import and both find the exp desc,
  * 2.thread1 runs quickly and returns from import,
  * 3.then thread3 calls unimport and frees the exp desc,
  * 4.UAF occurs once thread2 uses this exp desc afterward.
- * In import, querying exp desc is a critical section, should prevent
- * thread2 entering if thread1 is in. so EXP_DESC_IMPORTING is here.
+ * In import, searching exp desc is protected by a critical section. It should prevent
+ * thread2 from finding the same node if setting EXP_DESC_IMPORTING status whenever
+ * a node is found.
+ *
+ * For unimport, the target exp desc node stays in the import warehouse until the last
+ * processing is done(hyp_unmap) to make error handling less complicated. So there is
+ * another scenario may cause UAF.
+ * #4:
+ * 1. thread1 enters unimport and locates the target exp desc node with status EXP_DESC_IMPORTED
+ * 2. thread2 enters unimport and locates the same node with status EXP_DESC_IMPORTED
+ * 3. thread2 frees the exp node and removes it from import warehouse
+ * 4. thread1 tries to remove and free the same exp node but it is already gone
+ * Thus, EXP_DESC_UNIMPORTING is introduced to ensure the exclusiveness during unimport.
+ * EXP_DESC_UNIMPORTING is set after the target exp node is found with holding the imp whse lock
+ * The node status is reset to EXP_DESC_IMPORTED if any error occurs
  */
 enum exp_desc_state {
 	EXP_DESC_INIT,
 	EXP_DESC_IMPORTING,	/* hab_mem_import is in progress */
 	EXP_DESC_IMPORTED,	/* hab_mem_import is called and returns success */
+	EXP_DESC_UNIMPORTING,	/* hab_mem_unimport is in progress */
 };
 
 enum export_state {
