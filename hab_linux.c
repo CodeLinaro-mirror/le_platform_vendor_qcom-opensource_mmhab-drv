@@ -136,15 +136,16 @@ static long hab_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 	long ret = 0;
 	char names[30] = { 0 };
 
-	if (_IOC_SIZE(cmd) && (cmd & IOC_IN)) {
+	if (_IOC_SIZE(cmd) && (cmd & IOC_INOUT)) {
 		if (_IOC_SIZE(cmd) > sizeof(data))
 			return -EINVAL;
-
-		if (copy_from_user(data, (void __user *)arg, _IOC_SIZE(cmd))) {
-			pr_err("copy_from_user failed cmd=%x size=%d\n",
-				cmd, _IOC_SIZE(cmd));
-			return -EFAULT;
-		}
+		
+		if (cmd & IOC_IN)
+			if (copy_from_user(data, (void __user *)arg, _IOC_SIZE(cmd))) {
+				pr_err("copy_from_user failed cmd=%x size=%d\n",
+					cmd, _IOC_SIZE(cmd));
+				return -EFAULT;
+			}
 	}
 
 	switch (cmd) {
@@ -247,7 +248,7 @@ static long hab_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 		break;
 	}
 
-	if (_IOC_SIZE(cmd) && (cmd & IOC_OUT))
+	if ((ret != -ENOIOCTLCMD) && _IOC_SIZE(cmd) && (cmd & IOC_OUT))
 		if (copy_to_user((void __user *) arg, data, _IOC_SIZE(cmd))) {
 			pr_err("copy_to_user failed: cmd=%x\n", cmd);
 			ret = -EFAULT;
