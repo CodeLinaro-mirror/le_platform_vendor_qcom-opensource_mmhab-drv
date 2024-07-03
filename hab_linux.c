@@ -367,9 +367,9 @@ struct export_desc_super *hab_rb_exp_find(struct rb_root *root, struct export_de
 		else if (key->exp.export_id > exp_super->exp.export_id)
 			node = node->rb_right;
 		else {
-			if (key->exp.pchan < exp_super->exp.pchan)
+			if ((uint64_t)(key->exp.pchan) < (uint64_t)(exp_super->exp.pchan))
 				node = node->rb_left;
-			else if (key->exp.pchan > exp_super->exp.pchan)
+			else if ((uint64_t)(key->exp.pchan) > (uint64_t)(exp_super->exp.pchan))
 				node = node->rb_right;
 			else
 				return exp_super;
@@ -391,9 +391,9 @@ struct export_desc_super *hab_rb_exp_insert(struct rb_root *root, struct export_
 		else if (exp_super->exp.export_id > this->exp.export_id)
 			new = &((*new)->rb_right);
 		else {
-			if (exp_super->exp.pchan < this->exp.pchan)
+			if ((uint64_t)(exp_super->exp.pchan) < (uint64_t)(this->exp.pchan))
 				new = &((*new)->rb_left);
-			else if (exp_super->exp.pchan > this->exp.pchan)
+			else if ((uint64_t)(exp_super->exp.pchan) > (uint64_t)(this->exp.pchan))
 				new = &((*new)->rb_right);
 			else
 				/* should not found the target key before insert */
