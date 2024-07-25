@@ -739,12 +739,13 @@ static int virthab_probe(struct virtio_device *vdev)
 	virtio_device_ready(vdev);
 	pr_info("virto device ready\n");
 
-	vh->ready = true;
 	pr_debug("store virto device %pK empty %d\n", vh, list_empty(&vhab_list));
 
 	ret = virthab_queue_inbufs(vh, 1);
 	if (ret)
 		return ret;
+
+	vh->ready = true;
 
 	return 0;
 

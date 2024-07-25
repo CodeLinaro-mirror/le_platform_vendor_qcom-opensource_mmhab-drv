@@ -70,6 +70,7 @@ struct vhost_hab_dev { /* per user requested domain */
 	struct vhost_dev dev; /* vhost base device */
 	struct vhost_hab_cdev *vh_cdev;
 	int started;
+	int vmid;
 	struct list_head vh_pchan_list; /* pchannels on this vhost device */
 };
 
@@ -78,6 +79,7 @@ struct vhost_hab_cdev { /* per domain, per gvm */
 	dev_t dev_no;
 	struct cdev cdev;
 	uint32_t domain_id;
+	int vmid;
 	struct hab_device *habdevs[HABCFG_MMID_NUM];
 };
 
@@ -93,10 +95,9 @@ struct vhost_hab { /* global */
 	uint32_t num_cdevs; /* total number of cdevs created */
 	/*
 	 * all vhost hab char devices on the system.
-	 * mmid area starts from 1. Slot 0 is for
-	 * vhost-hab which controls all the pchannels.
+	 * mmid area starts from 1.
 	 */
-	struct vhost_hab_cdev *vh_cdevs[HABCFG_MMID_AREA_MAX + 1];
+	struct vhost_hab_cdev *vh_cdevs[(HABCFG_MMID_AREA_MAX + 1) * HABCFG_VMID_MAX];
 	struct list_head vh_pchan_list; /* avalible pchannels on the system */
 	struct mutex pchan_mutex;
 	struct workqueue_struct *wq;
@@ -291,6 +292,7 @@ static int vhost_hab_open(struct inode *inode, struct file *f)
 	if (!vh_dev)
 		return -ENOMEM;
 
+	vh_dev->vmid = vh_cdev->vmid;
 	INIT_LIST_HEAD(&vh_dev->vh_pchan_list);
 	mutex_lock(&g_vh.pchan_mutex);
 	for (i = 0; i < HABCFG_MMID_NUM; i++) {
@@ -306,7 +308,8 @@ static int vhost_hab_open(struct inode *inode, struct file *f)
 			pr_debug("%s: vh-pchan id %d\n", __func__,
 				vh_pchan->habdev->id);
 
-			if (vh_pchan->habdev == habdev) {
+			if (vh_pchan->habdev == habdev
+				&& vh_pchan->pchan->dom_id == vh_dev->vmid) {
 				pr_debug("%s: find vh_pchan for mmid %d\n",
 					__func__, habdev->id);
 				list_move_tail(&vh_pchan->node,
@@ -435,9 +438,7 @@ static int vhost_hab_release(struct inode *inode, struct file *f)
 			/* reset the seq_rx here */
 			vh_pchan->pchan->sequence_rx = 0;
 			vh_pchan->pchan->sequence_tx = 0;
-			vh_pchan->pchan->hyp_data = NULL;
 			hab_pchan_put(vh_pchan->pchan);
-			vh_pchan->pchan = NULL;
 		}
 		list_move_tail(&vh_pchan->node, &g_vh.vh_pchan_list);
 	}
@@ -621,80 +622,15 @@ static int vhost_hab_set_features(struct vhost_hab_dev *vh_dev, u64 features)
 	return 0;
 }
 
-static int vhost_hab_set_pchannels(struct vhost_hab_dev *vh_dev, int vmid)
+static inline void vhost_hab_dev_start_pchans(struct vhost_hab_dev *vh_dev)
 {
 	struct vhost_hab_pchannel *vh_pchan;
-	struct physical_channel *pchan;
-	int ret = 0;
 
-	mutex_lock(&g_vh.pchan_mutex);
 	list_for_each_entry(vh_pchan, &vh_dev->vh_pchan_list, node) {
-		pchan = hab_pchan_find_domid(vh_pchan->habdev, vmid);
-		if (!pchan || pchan->hyp_data) {
-			pr_err("failed to find pchan for mmid %d, vmid %d\n",
-				vh_pchan->habdev->id, vmid);
-			goto err;
+		if (vh_pchan) {
+			vh_pchan->pchan->otherend_closed = 0;
 		}
-
-		vh_pchan->pchan = pchan;
-		pchan->otherend_closed = 0;
-		pchan->hyp_data = vh_pchan;
 	}
-
-	mutex_unlock(&g_vh.pchan_mutex);
-	return ret;
-
-err:
-	list_for_each_entry_continue_reverse(vh_pchan, &vh_dev->vh_pchan_list,
-						node) {
-		vh_pchan->pchan->hyp_data = NULL;
-		hab_pchan_put(vh_pchan->pchan);
-		vh_pchan->pchan = NULL;
-	}
-	mutex_unlock(&g_vh.pchan_mutex);
-	return -ENODEV;
-}
-
-static int vhost_hab_set_config(struct vhost_hab_dev *vh_dev,
-				struct vhost_config *cfg)
-{
-	struct vhost_hab_config hab_cfg;
-	size_t vm_name_size = sizeof(hab_cfg.vm_name);
-	size_t cfg_size = min_t(size_t, (size_t)cfg->size, sizeof(hab_cfg));
-	char *s, *t;
-	int vmid;
-	int ret;
-
-	if (copy_from_user(&hab_cfg, cfg->data + cfg->offset, cfg_size))
-		return -EFAULT;
-
-	hab_cfg.vm_name[vm_name_size - 1] = '\0';
-
-	pr_info("%s: vm_name %s\n", __func__, hab_cfg.vm_name);
-	s = strnstr(hab_cfg.vm_name, "vm", vm_name_size);
-	if (!s) {
-		pr_err("vmid is not found in vm_name\n");
-		return -EINVAL;
-	}
-
-	s += 2; /* skip 'vm' */
-	if (s >= (hab_cfg.vm_name + vm_name_size)) {
-		pr_err("id is not found after 'vm' in vm_name\n");
-		return -EINVAL;
-	}
-
-	/* terminate string at '-' after 'vm' */
-	t = strchrnul(s, '-');
-	*t = '\0';
-
-	ret = kstrtoint(s, 10, &vmid);
-	if (ret < 0) {
-		pr_err("failed to parse vmid from %s, %d\n", s, ret);
-		return ret;
-	}
-
-	pr_debug("vmid=%d\n", vmid);
-	return vhost_hab_set_pchannels(vh_dev, vmid);
 }
 
 static long vhost_hab_ioctl(struct file *f, unsigned int ioctl,
@@ -722,11 +658,7 @@ static long vhost_hab_ioctl(struct file *f, unsigned int ioctl,
 		r = vhost_hab_set_features(vh_dev, features);
 		break;
 	case VHOST_SET_CONFIG:
-		if (copy_from_user(&config, argp, sizeof(config))) {
-			r = -EFAULT;
-			break;
-		}
-		r = vhost_hab_set_config(vh_dev, &config);
+		pr_debug("skip VHOST_SET_CONFIG\n");
 		break;
 	case VHOST_GET_FEATURES:
 		features = VHOST_FEATURES;
@@ -745,8 +677,10 @@ static long vhost_hab_ioctl(struct file *f, unsigned int ioctl,
 
 		vhost_hab_flush(vh_dev);
 		mutex_unlock(&vh_dev->dev.mutex);
-		if (vhost_hab_ready_check(vh_dev) == 0)
+		if (vhost_hab_ready_check(vh_dev) == 0) {
+			vhost_hab_dev_start_pchans(vh_dev);
 			(void)vhost_hab_run(vh_dev, 1);
+		}
 
 		break;
 	}
@@ -1168,12 +1102,13 @@ static const struct file_operations vhost_hab_fops = {
 #endif
 };
 
-static struct vhost_hab_cdev *get_cdev(uint32_t domain_id)
+static struct vhost_hab_cdev *get_cdev(uint32_t domain_id, int vmid_remote)
 {
 	struct vhost_hab *vh = &g_vh;
-	struct vhost_hab_cdev *vh_cdev = vh->vh_cdevs[domain_id];
+	struct vhost_hab_cdev *vh_cdev;
 	int ret;
 
+	vh_cdev = vh->vh_cdevs[(HABCFG_MMID_AREA_MAX + 1) * vmid_remote + domain_id];
 	if (vh_cdev != NULL)
 		return vh_cdev;
 
@@ -1183,7 +1118,14 @@ static struct vhost_hab_cdev *get_cdev(uint32_t domain_id)
 
 	cdev_init(&vh_cdev->cdev, &vhost_hab_fops);
 	vh_cdev->cdev.owner = THIS_MODULE;
-	vh_cdev->dev_no = MKDEV(vh->major, domain_id);
+
+    /*
+     * #define MINORBITS    20
+     * #define MKDEV(ma,mi) (((ma) << MINORBITS) | (mi))
+     *
+     * MINOR should be less than (1 << 20 - 1 = 1048575), so MINOR overflow will not happend
+     */
+	vh_cdev->dev_no = MKDEV(vh->major, (HABCFG_MMID_AREA_MAX + 1) * vmid_remote + domain_id);
 	ret = cdev_add(&vh_cdev->cdev, vh_cdev->dev_no, 1);
 	if (ret) {
 		pr_err("cdev_add failed for dev_no %d, domain_id %d\n",
@@ -1191,16 +1133,24 @@ static struct vhost_hab_cdev *get_cdev(uint32_t domain_id)
 		goto err_free_cdev;
 	}
 
-	vh_cdev->dev = device_create(vh->class, NULL, vh_cdev->dev_no, NULL,
-					"vhost-%s", hab_area_names[domain_id]);
+	/* gvm with vmid=2 will use the default device nodes */
+	if (vmid_remote == 2) {
+		vh_cdev->dev = device_create(vh->class, NULL, vh_cdev->dev_no, NULL,
+						"vhost-%s", hab_area_names[domain_id]);
+	} else {
+		vh_cdev->dev = device_create(vh->class, NULL, vh_cdev->dev_no, NULL,
+						"vhost-vm%d-%s", vmid_remote, hab_area_names[domain_id]);
+	}
+
 	if (IS_ERR_OR_NULL(vh_cdev->dev)) {
 		pr_err("device_create failed for, domain_id %d\n", domain_id);
 		goto err_cdev_del;
 	}
 
 	vh_cdev->domain_id = domain_id;
+	vh_cdev->vmid = vmid_remote;
 
-	vh->vh_cdevs[domain_id] = vh_cdev;
+	vh->vh_cdevs[(HABCFG_MMID_AREA_MAX + 1) * vmid_remote + domain_id] = vh_cdev;
 
 	return vh_cdev;
 
@@ -1212,7 +1162,8 @@ err_free_cdev:
 	return NULL;
 }
 
-static void del_hab_device_from_cdev(uint32_t mmid, struct hab_device *habdev)
+static void del_hab_device_from_cdev(uint32_t mmid, struct hab_device *habdev,
+				int vmid_remote)
 {
 	struct vhost_hab *vh = &g_vh;
 	struct vhost_hab_cdev *vh_cdev;
@@ -1220,7 +1171,7 @@ static void del_hab_device_from_cdev(uint32_t mmid, struct hab_device *habdev)
 	bool destroy = true;
 	int i;
 
-	vh_cdev = vh->vh_cdevs[domain_id];
+	vh_cdev = vh->vh_cdevs[(HABCFG_MMID_AREA_MAX + 1) * vmid_remote + domain_id];
 	if (vh_cdev == NULL) {
 		pr_err("cdev not created for domain %d\n", domain_id);
 		return;
@@ -1242,22 +1193,23 @@ static void del_hab_device_from_cdev(uint32_t mmid, struct hab_device *habdev)
 	device_destroy(vh->class, vh_cdev->dev_no);
 	cdev_del(&vh_cdev->cdev);
 	kfree(vh_cdev);
-	vh->vh_cdevs[domain_id] = NULL;
+	vh->vh_cdevs[(HABCFG_MMID_AREA_MAX + 1) * vmid_remote + domain_id] = NULL;
 }
 
-static void vhost_hab_cdev_del_hab_device(struct hab_device *habdev)
+static void vhost_hab_cdev_del_hab_device(struct hab_device *habdev, int vmid_remote)
 {
-	del_hab_device_from_cdev(habdev->id, habdev);
-	del_hab_device_from_cdev(HAB_MMID_ALL_AREA, habdev);
+	del_hab_device_from_cdev(habdev->id, habdev, vmid_remote);
+	del_hab_device_from_cdev(HAB_MMID_ALL_AREA, habdev, vmid_remote);
 }
 
-static int add_hab_device_to_cdev(uint32_t mmid, struct hab_device *habdev)
+static int add_hab_device_to_cdev(uint32_t mmid, struct hab_device *habdev,
+			int vmid_remote)
 {
 	struct vhost_hab_cdev *vh_cdev;
-	uint32_t domain_id = mmid / 100;
+	uint32_t mmid_grp_id = mmid / 100;
 	int i;
 
-	vh_cdev = get_cdev(domain_id);
+	vh_cdev = get_cdev(mmid_grp_id, vmid_remote);
 	if (vh_cdev == NULL)
 		return -ENODEV;
 
@@ -1276,17 +1228,17 @@ static int add_hab_device_to_cdev(uint32_t mmid, struct hab_device *habdev)
 	return 0;
 }
 
-static int vhost_hab_cdev_add_hab_device(struct hab_device *habdev)
+static int vhost_hab_cdev_add_hab_device(struct hab_device *habdev, int vmid_remote)
 {
 	int ret;
 
-	ret = add_hab_device_to_cdev(HAB_MMID_ALL_AREA, habdev);
+	ret = add_hab_device_to_cdev(HAB_MMID_ALL_AREA, habdev, vmid_remote);
 	if (ret)
 		return ret;
 
-	ret = add_hab_device_to_cdev(habdev->id, habdev);
+	ret = add_hab_device_to_cdev(habdev->id, habdev, vmid_remote);
 	if (ret)
-		del_hab_device_from_cdev(HAB_MMID_ALL_AREA, habdev);
+		del_hab_device_from_cdev(HAB_MMID_ALL_AREA, habdev, vmid_remote);
 
 	return ret;
 }
@@ -1307,6 +1259,8 @@ int habhyp_commdev_alloc(void **commdev, int is_be, char *name,
 	}
 
 	pchan->closed = 0;
+	/* pchan will not work until vhost_dev_start_pchans is called */
+	pchan->otherend_closed = 1;
 	pchan->is_be = 1; /* vhost is always backend */
 	(void)strscpy(pchan->name, name, sizeof(pchan->name));
 
@@ -1327,17 +1281,16 @@ int habhyp_commdev_alloc(void **commdev, int is_be, char *name,
 	mutex_init(&vh_pchan->send_list_mutex);
 	INIT_LIST_HEAD(&vh_pchan->send_list);
 
-	/* only add hab device when the first pchannel is added to it */
-	if (habdev->pchan_cnt == 1) {
-		ret = vhost_hab_cdev_add_hab_device(habdev);
-		if (ret) {
-			pr_err("vhost_hab_cdev_add_hab_device failed, vmid %d, mmid %d\n",
-				vmid_remote, habdev->id);
-			goto err_free_vh_pchan;
-		}
+	ret = vhost_hab_cdev_add_hab_device(habdev, vmid_remote);
+	if (ret) {
+		pr_err("vhost_hab_cdev_add_hab_device failed, vmid %d, mmid %d\n",
+			vmid_remote, habdev->id);
+		goto err_free_vh_pchan;
 	}
 
 	vh_pchan->habdev = habdev;
+	vh_pchan->pchan = pchan;
+	pchan->hyp_data = vh_pchan;
 	list_add_tail(&vh_pchan->node, &g_vh.vh_pchan_list);
 	*commdev = pchan;
 
@@ -1359,9 +1312,7 @@ int habhyp_commdev_dealloc(void *commdev)
 	struct physical_channel *pchan = commdev;
 	struct hab_device *habdev = pchan->habdev;
 
-	/* only remove hab device when removing the last pchannel */
-	if (habdev->pchan_cnt == 1)
-		vhost_hab_cdev_del_hab_device(habdev);
+	vhost_hab_cdev_del_hab_device(habdev, pchan->dom_id);
 
 	hab_pchan_put(pchan);
 
