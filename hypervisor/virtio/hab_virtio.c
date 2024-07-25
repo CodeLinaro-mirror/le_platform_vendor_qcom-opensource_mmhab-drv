@@ -732,19 +732,23 @@ static int virthab_probe(struct virtio_device *vdev)
 		return ret;
 	}
 
+	/* vh->link is ready and we can call physical_channel_send/recv after this */
 	err = virthab_init_vqs(vh);
 	if (err)
 		goto err_init_vq;
 
+	/* notify virtio hab BE device side that virtio hab driver is ready */
 	virtio_device_ready(vdev);
 	pr_info("virto device ready\n");
 
-	vh->ready = true;
 	pr_debug("store virto device %pK empty %d\n", vh, list_empty(&vhab_list));
 
 	ret = virthab_queue_inbufs(vh, 1);
 	if (ret)
 		return ret;
+
+	/* vh->ready, true, means virtio hab driver init fully completes. */
+	vh->ready = true;
 
 	return 0;
 

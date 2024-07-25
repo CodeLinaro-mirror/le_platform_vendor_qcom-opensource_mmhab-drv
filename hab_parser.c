@@ -136,6 +136,12 @@ static int hab_parse_dt(struct local_vmid *settings)
 			pr_debug("vmids_num = %d, vmids[%d] = %d\n",
 				vmids_num, i, vmids[i]);
 
+			if (vmids[i] >= (unsigned)HABCFG_VMID_MAX) {
+				pr_err("vmid %d is invalid, max value is %d\n",
+						vmids[i], HABCFG_VMID_MAX - 1);
+				return -EINVAL;
+			}
+
 			result = fill_vmid_mmid_tbl(
 					settings->vmid_mmid_list,
 					vmids[i], 1,
