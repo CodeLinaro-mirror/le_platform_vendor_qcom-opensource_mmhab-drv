@@ -1106,8 +1106,11 @@ int physical_channel_send(struct physical_channel *pchan,
 	mutex_unlock(&vh_pchan->send_list_mutex);
 
 	trace_hab_pchan_send_done(pchan);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0))
+	vhost_vq_work_queue(vq, &vh_pchan->rx_send_work);
+#else
 	vhost_work_queue(&vh_dev->dev, &vh_pchan->rx_send_work);
-
+#endif
 	return 0;
 }
 
@@ -1147,7 +1150,11 @@ void physical_channel_rx_dispatch(unsigned long physical_channel)
 	vq = vh_pchan->vqs + VHOST_HAB_PCHAN_TX_VQ;
 	vh_dev = container_of(vq->dev, struct vhost_hab_dev, dev);
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0))
+        vhost_vq_work_queue(vq, &vh_pchan->tx_recv_work);
+#else
 	vhost_work_queue(&vh_dev->dev, &vh_pchan->tx_recv_work);
+#endif
 }
 
 static const struct file_operations vhost_hab_fops = {
