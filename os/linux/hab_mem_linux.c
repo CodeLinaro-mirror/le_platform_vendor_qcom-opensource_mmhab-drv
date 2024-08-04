@@ -930,10 +930,6 @@ static struct dma_buf *habmem_import_to_dma_buf(
 	struct dma_buf *dmabuf = NULL;
 	DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
 
-	pglist = pages_list_lookup(export->export_id, pchan, true);
-	if (pglist)
-		goto buffer_ready;
-
 	pglist = pages_list_create(export, userflags);
 	if (IS_ERR(pglist))
 		return (void *)pglist;
@@ -941,7 +937,6 @@ static struct dma_buf *habmem_import_to_dma_buf(
 	pages_list_add(pglist);
 	pglist->type = HAB_PAGE_LIST_IMPORT;
 
-buffer_ready:
 	exp_info.ops = &dma_buf_ops;
 	exp_info.size = pglist->npages << PAGE_SHIFT;
 	exp_info.flags = O_RDWR;

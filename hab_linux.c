@@ -342,11 +342,68 @@ static void reclaim_cleanup(struct work_struct *reclaim_work)
 		exp_super = container_of(export, struct export_desc_super, exp);
 		pchan = export->pchan;
 		spin_lock_bh(&pchan->expid_lock);
-		idr_remove(&pchan->expid_idr, export->export_id);
+		(void)idr_remove(&pchan->expid_idr, export->export_id);
 		spin_unlock_bh(&pchan->expid_lock);
 		pr_info("cleanup exp id %u from %s\n", export->export_id, pchan->name);
 		habmem_export_put(exp_super);
 	}
+}
+
+void hab_rb_init(struct rb_root *root)
+{
+	*root = RB_ROOT;
+}
+
+struct export_desc_super *hab_rb_exp_find(struct rb_root *root, struct export_desc_super *key)
+{
+	struct rb_node *node = root->rb_node;
+	struct export_desc_super *exp_super;
+
+	while(node) {
+		exp_super = rb_entry(node, struct export_desc_super, node);
+		if (key->exp.export_id < exp_super->exp.export_id)
+			node = node->rb_left;
+		else if (key->exp.export_id > exp_super->exp.export_id)
+			node = node->rb_right;
+		else {
+			if (key->exp.pchan < exp_super->exp.pchan)
+				node = node->rb_left;
+			else if (key->exp.pchan > exp_super->exp.pchan)
+				node = node->rb_right;
+			else
+				return exp_super;
+		}
+	}
+
+	return NULL;
+}
+
+struct export_desc_super *hab_rb_exp_insert(struct rb_root *root, struct export_desc_super *exp_super)
+{
+	struct rb_node **new = &(root->rb_node), *parent = NULL;
+
+	while (*new) {
+		struct export_desc_super *this = rb_entry(*new, struct export_desc_super, node);
+		parent = *new;
+		if (exp_super->exp.export_id < this->exp.export_id)
+			new = &((*new)->rb_left);
+		else if (exp_super->exp.export_id > this->exp.export_id)
+			new = &((*new)->rb_right);
+		else {
+			if (exp_super->exp.pchan < this->exp.pchan)
+				new = &((*new)->rb_left);
+			else if (exp_super->exp.pchan > this->exp.pchan)
+				new = &((*new)->rb_right);
+			else
+				/* should not found the target key before insert */
+				return this;
+		}
+	}
+
+	rb_link_node(&exp_super->node, parent, new);
+	rb_insert_color(&exp_super->node, root);
+
+	return NULL;
 }
 
 static int __init hab_init(void)

@@ -336,7 +336,7 @@ struct uhab_context {
 	rwlock_t exp_lock;
 	spinlock_t expq_lock;
 
-	struct list_head imp_whse;
+	HAB_RB_ROOT imp_whse;
 	spinlock_t imp_lock;
 	uint32_t import_total;
 
@@ -520,6 +520,8 @@ struct export_desc_super {
 	enum exp_desc_state import_state;
 	enum export_state exp_state;
 	uint32_t remote_imported;
+
+	HAB_RB_ENTRY node;
 
 	/*
 	 * exp must be the last member
@@ -774,4 +776,7 @@ int hab_stat_log(struct physical_channel **pchans, int pchan_cnt, char *dest,
 			int dest_size);
 int hab_stat_buffer_print(char *dest,
 		int dest_size, const char *fmt, ...);
+
+HAB_RB_PROTOTYPE(exp_desc_rbtree, export_desc_super, node, expid_cmp);
+
 #endif /* __HAB_H */
