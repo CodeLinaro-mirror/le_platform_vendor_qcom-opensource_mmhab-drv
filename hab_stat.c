@@ -84,7 +84,7 @@ int hab_stat_show_ctx(struct hab_driver *driver,
 	int ret = 0;
 	struct uhab_context *ctx;
 
-	ret = strscpy(buf, "", size);
+	(void)strscpy(buf, "", size);
 
 	spin_lock_bh(&hab_driver.drvlock);
 	ret = hab_stat_buffer_print(buf, size,
@@ -224,7 +224,7 @@ int hab_stat_show_expimp(struct hab_driver *driver,
 
 int hab_stat_show_reclaim(struct hab_driver *driver, char *buf, int size)
 {
-	struct export_desc *exp = NULL;
+	struct export_desc *export = NULL;
 	struct compressed_pfns *pfn_table = NULL;
 	int exim_size = 0;
 	size_t total_size = 0, total_num = 0;
@@ -233,16 +233,16 @@ int hab_stat_show_reclaim(struct hab_driver *driver, char *buf, int size)
 	(void)hab_stat_buffer_print(buf, size, "export[expid:vcid:size:pchan]:\n");
 
 	spin_lock(&hab_driver.reclaim_lock);
-	list_for_each_entry(exp, &hab_driver.reclaim_list, node) {
-		pfn_table = (struct compressed_pfns *)exp->payload;
+	list_for_each_entry(export, &hab_driver.reclaim_list, node) {
+		pfn_table = (struct compressed_pfns *)export->payload;
 		exim_size = get_pft_tbl_total_size(pfn_table);
 		total_size += exim_size;
 		total_num++;
 		(void)hab_stat_buffer_print(buf, size, "[%d:%x:%d:%s] ",
-			exp->export_id,
-			exp->vcid_local,
+			export->export_id,
+			export->vcid_local,
 			exim_size,
-			exp->pchan->name);
+			export->pchan->name);
 		(void)hab_stat_buffer_print(buf, size, "\n");
 	}
 	spin_unlock(&hab_driver.reclaim_lock);

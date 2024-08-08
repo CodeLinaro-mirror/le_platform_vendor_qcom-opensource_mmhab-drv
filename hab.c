@@ -459,6 +459,99 @@ err:
 	return ERR_PTR(ret);
 }
 
+static int hab_init_msg_wait(struct uhab_context *ctx,
+				struct hab_device *dev,
+				unsigned int mm_id,
+				int timeout,
+				struct hab_open_request *request,
+				struct hab_open_request **recv_request)
+{
+	int ret, ret2;
+	int sub_id = HAB_MMID_GET_MINOR(mm_id);
+
+	hab_open_request_init(request, HAB_PAYLOAD_TYPE_INIT,
+		NULL, 0, sub_id, 0);
+	/* cancel should not happen at this moment */
+	ret = hab_open_listen(ctx, dev, request, recv_request,
+			timeout);
+	if (ret || !(*recv_request)) {
+		if (!ret && !(*recv_request))
+			ret = -EINVAL;
+		if (-EAGAIN == ret)
+			ret = -ETIMEDOUT;
+		else if (-ENXIO == ret)
+			pr_debug("open request canceling\n");
+		else
+			/* device is closed */
+			pr_err("open request wait failed ctx closing %d\n",
+					ctx->closing);
+	} else if (!ret && *recv_request &&
+				(((*recv_request)->xdata.ver_fe & 0xFFFF0000U) !=
+				(HAB_API_VER & 0xFFFF0000U))) {
+		/* version check */
+		pr_err("version mismatch fe %X be %X on mmid %d\n",
+		(*recv_request)->xdata.ver_fe, HAB_API_VER, mm_id);
+		hab_open_request_init(request,
+			HAB_PAYLOAD_TYPE_INIT_ACK,
+			NULL, 0, sub_id, (*recv_request)->xdata.open_id);
+		request->xdata.ver_be = HAB_API_VER;
+		/* reply to allow FE to bail out */
+		ret2 = hab_open_request_send(request);
+		if (ret2)
+			pr_err("send FE version mismatch failed mmid %d sub %d\n",
+				mm_id, sub_id);
+		ret = -EPROTO;
+	} else
+		ret = 0;
+
+	return ret;
+}
+
+static int hab_init_done_msg_wait(struct uhab_context *ctx,
+				struct hab_device *dev,
+				struct virtual_channel *vchan,
+				unsigned int mm_id,
+				struct hab_open_request *request,
+				struct hab_open_request **recv_request,
+				struct hab_open_node *pending_open)
+{
+	int ret, ret2;
+	int sub_id = HAB_MMID_GET_MINOR(mm_id);
+
+	/* Wait for Ack sequence */
+	hab_open_request_init(request, HAB_PAYLOAD_TYPE_INIT_DONE,
+			vchan->pchan, 0, sub_id, vchan->session_id);
+	ret = hab_open_listen(ctx, dev, request, recv_request,
+		HAB_HS_TIMEOUT);
+	(void)hab_open_pending_exit(ctx, vchan->pchan, pending_open);
+	if (ret && *recv_request &&
+		(*recv_request)->type == HAB_PAYLOAD_TYPE_INIT_CANCEL) {
+		pr_err("listen cancelled vcid %x subid %d openid %d ret %d\n",
+			request->xdata.vchan_id, request->xdata.sub_id,
+			request->xdata.open_id, ret);
+
+		/* FE canceled this session.
+		 * So BE has to cancel its too
+		 */
+		hab_open_request_init(request,
+				HAB_PAYLOAD_TYPE_INIT_CANCEL, vchan->pchan,
+				vchan->id, sub_id, vchan->session_id);
+		ret2 = hab_open_request_send(request);
+		if (ret2)
+			pr_err("send init_ack failed %d on vcid %x\n",
+				ret2, vchan->id);
+		(void)hab_open_pending_exit(ctx, vchan->pchan, pending_open);
+
+		ret = -ENODEV; /* open request cancelled remotely */
+	} else if (ret == -ENXIO)
+		pr_warn("backend mmid %d listen canceling\n", mm_id);
+	else
+		if (ret != -EAGAIN)
+			(void)hab_open_pending_exit(ctx, vchan->pchan, pending_open);
+
+	return ret;
+}
+
 static struct virtual_channel *backend_listen(struct uhab_context *ctx,
 		unsigned int mm_id, int timeout)
 {
@@ -481,44 +574,9 @@ static struct virtual_channel *backend_listen(struct uhab_context *ctx,
 	}
 
 	while (1) {
-		/* Wait for Init sequence */
-		hab_open_request_init(&request, HAB_PAYLOAD_TYPE_INIT,
-			NULL, 0, sub_id, 0);
-		/* cancel should not happen at this moment */
-		ret = hab_open_listen(ctx, dev, &request, &recv_request,
-				timeout);
-		if (ret || !recv_request) {
-			if (!ret && !recv_request)
-				ret = -EINVAL;
-			if (-EAGAIN == ret) {
-				ret = -ETIMEDOUT;
-			} else if (-ENXIO == ret) {
-				pr_debug("open request canceling\n");
-			} else {
-				/* device is closed */
-				pr_err("open request wait failed ctx closing %d\n",
-						ctx->closing);
-			}
+		ret = hab_init_msg_wait(ctx, dev, mm_id, timeout, &request, &recv_request);
+		if (ret || (recv_request == NULL))
 			goto err;
-		} else
-			if (!ret && recv_request &&
-				   ((recv_request->xdata.ver_fe & 0xFFFF0000U) !=
-					(HAB_API_VER & 0xFFFF0000U))) {
-				/* version check */
-				pr_err("version mismatch fe %X be %X on mmid %d\n",
-				recv_request->xdata.ver_fe, HAB_API_VER, mm_id);
-				hab_open_request_init(&request,
-					HAB_PAYLOAD_TYPE_INIT_ACK,
-					NULL, 0, sub_id, recv_request->xdata.open_id);
-				request.xdata.ver_be = HAB_API_VER;
-				/* reply to allow FE to bail out */
-				ret2 = hab_open_request_send(&request);
-				if (ret2)
-					pr_err("send FE version mismatch failed mmid %d sub %d\n",
-						mm_id, sub_id);
-				ret = -EPROTO;
-				goto err;
-			}
 
 		recv_request->pchan->mem_proto = (recv_request->xdata.ver_proto == 0) ? 0 : 1;
 		pr_info_once("mem proto ver %u\n", recv_request->pchan->mem_proto);
@@ -553,40 +611,16 @@ static struct virtual_channel *backend_listen(struct uhab_context *ctx,
 		/* wait only after init-ack is sent */
 		(void)hab_open_pending_enter(ctx, pchan, &pending_open);
 
-		/* Wait for Ack sequence */
-		hab_open_request_init(&request, HAB_PAYLOAD_TYPE_INIT_DONE,
-				pchan, 0, sub_id, open_id);
-		ret = hab_open_listen(ctx, dev, &request, &recv_request,
-			HAB_HS_TIMEOUT);
-		(void)hab_open_pending_exit(ctx, pchan, &pending_open);
-		if (ret && recv_request &&
-			recv_request->type == HAB_PAYLOAD_TYPE_INIT_CANCEL) {
-			pr_err("listen cancelled vcid %x subid %d openid %d ret %d\n",
-				request.xdata.vchan_id, request.xdata.sub_id,
-				request.xdata.open_id, ret);
-
-			/* FE cancels this session.
-			 * So BE has to cancel its too
-			 */
-			hab_open_request_init(&request,
-					HAB_PAYLOAD_TYPE_INIT_CANCEL, pchan,
-					vchan->id, sub_id, open_id);
-			ret2 = hab_open_request_send(&request);
-			if (ret2)
-				pr_err("send init_ack failed %d on vcid %x\n",
-					ret2, vchan->id);
-			(void)hab_open_pending_exit(ctx, pchan, &pending_open);
-
-			ret = -ENODEV; /* open request cancelled remotely */
-			break;
-		} else if (ret == -ENXIO) {
-			pr_warn("backend mmid %d listen canceling\n", mm_id);
+		ret = hab_init_done_msg_wait(ctx, dev, vchan, mm_id,
+				&request, &recv_request, &pending_open);
+		if (ret == -ENXIO)
 			goto err;
-		} else
-			if (ret != -EAGAIN) {
-				(void)hab_open_pending_exit(ctx, pchan, &pending_open);
-				break; /* received something. good case! */
-			}
+		if (ret != -EAGAIN)
+			/*
+			 * -ENODEV: canceled remotely
+			 * other cases: received something. good case!
+			 */
+			break;
 
 		/* stay in the loop retry */
 		pr_warn("retry open ret %d vcid %X remote %X sub %d open %d\n",

@@ -136,17 +136,6 @@ static void do_rx_send_work(struct vhost_work *work)
 	rx_worker(vh_pchan);
 }
 
-static int rx_send_list_empty(struct vhost_hab_pchannel *vh_pchan)
-{
-	int ret;
-
-	mutex_lock(&vh_pchan->send_list_mutex);
-	ret = list_empty(&vh_pchan->send_list);
-	mutex_unlock(&vh_pchan->send_list_mutex);
-
-	return ret;
-}
-
 static void tx_worker(struct vhost_hab_pchannel *vh_pchan)
 {
 	struct vhost_virtqueue *vq = vh_pchan->vqs + VHOST_HAB_PCHAN_TX_VQ;
@@ -567,17 +556,13 @@ static long vhost_hab_reset_owner(struct vhost_hab_dev *vh_dev)
 
 	/* stop All vchans of a given vhost-dev (Eg Audio/video etc) */
 	list_for_each_entry(vh_pchan, &vh_dev->vh_pchan_list, node) {
-		if (vh_pchan) {
-			hab_vchans_stop(vh_pchan->pchan);
-			vh_pchan->pchan->otherend_closed = 1;
-		}
+		hab_vchans_stop(vh_pchan->pchan);
+		vh_pchan->pchan->otherend_closed = 1;
 	}
 
 	/* hab driver is expecting BEs to close all the vchans */
-	list_for_each_entry(vh_pchan, &vh_dev->vh_pchan_list, node) {
-                if (vh_pchan)
-			hab_vchans_empty_wait_pchan(vh_pchan->pchan);
-        }
+	list_for_each_entry(vh_pchan, &vh_dev->vh_pchan_list, node)
+		hab_vchans_empty_wait_pchan(vh_pchan->pchan);
 
 	mutex_lock(&vh_dev->dev.mutex);
 	err = vhost_dev_check_owner(&vh_dev->dev);
@@ -603,7 +588,7 @@ static int vhost_hab_set_features(struct vhost_hab_dev *vh_dev, u64 features)
 	int i;
 
 	mutex_lock(&vh_dev->dev.mutex);
-	if ((features & (1 << VHOST_F_LOG_ALL)) &&
+	if ((features & (1U << VHOST_F_LOG_ALL)) &&
 	    !vhost_log_access_ok(&vh_dev->dev)) {
 		mutex_unlock(&vh_dev->dev.mutex);
 		return -EFAULT;
