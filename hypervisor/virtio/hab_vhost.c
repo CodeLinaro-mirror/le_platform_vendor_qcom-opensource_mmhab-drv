@@ -120,8 +120,9 @@ static char hab_area_names[HABCFG_MMID_AREA_MAX + 1][HAB_AREA_NAME_MAX] = {
 	[MM_DATA_START / 100] = "network",
 	[MM_HSI2S_START / 100] = "hsi2s",
 	[MM_XVM_START / 100] = "xvm",
-	[MM_VNW_START / 100] = "vnm",
-	[MM_EXT_START /100] = "ext"
+	[MM_VNW_START / 100] = "vnw",
+	[MM_EXT_START /100] = "ext",
+	[MM_GPCE_START /100] = "gpce"
 };
 
 static void rx_worker(struct vhost_hab_pchannel *vh_pchan);
