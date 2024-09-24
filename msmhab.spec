@@ -46,7 +46,7 @@ depmod %{kversion_with_debug}
 
 %install
 KSRC=%{_usrsrc}/kernels/%{kversion_with_debug}
-make KERNEL_SRC=${KSRC} INSTALL_MOD_PATH=$RPM_BUILD_ROOT modules_install
+make KERNEL_SRC=${KSRC} INSTALL_MOD_DIR=extra INSTALL_MOD_PATH=$RPM_BUILD_ROOT modules_install
 make KERNEL_SRC=${KSRC} HDR_INSTAL_PATH=$RPM_BUILD_ROOT/usr/include headers_install
 %{__install} -d %{buildroot}%{_sysconfdir}/modules-load.d/
 %{__install} %{kmod_name}.conf %{buildroot}%{_sysconfdir}/modules-load.d/

@@ -16,6 +16,9 @@
 #include <linux/irqbypass.h>
 
 struct vhost_work;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0))
+struct vhost_task;
+#endif
 typedef void (*vhost_work_fn_t)(struct vhost_work *work);
 
 #define VHOST_WORK_QUEUED 1
@@ -26,10 +29,20 @@ struct vhost_work {
 };
 
 struct vhost_worker {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0))
+	struct vhost_task	*vtsk;
+#else
 	struct task_struct	*task;
-	struct llist_head	work_list;
 	struct vhost_dev	*dev;
+#endif
+	struct llist_head	work_list;
 	u64			kcov_handle;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0))
+	/* Used to serialize device wide flushing with worker swapping. */
+	struct mutex            mutex;
+	u32			id;
+	int			attachment_cnt;
+#endif
 };
 
 /* Poll a file (eventfd or socket) */
@@ -41,17 +54,30 @@ struct vhost_poll {
 	struct vhost_work	work;
 	__poll_t		mask;
 	struct vhost_dev	*dev;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0))
+	struct vhost_virtqueue	*vq;
+#endif
 };
 
-void vhost_work_init(struct vhost_work *work, vhost_work_fn_t fn);
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 5, 0))
 void vhost_work_queue(struct vhost_dev *dev, struct vhost_work *work);
 bool vhost_has_work(struct vhost_dev *dev);
+#endif
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0))
+void vhost_poll_init(struct vhost_poll *poll, vhost_work_fn_t fn,
+		     __poll_t mask, struct vhost_dev *dev,
+		     struct vhost_virtqueue *vq);
+#else
 void vhost_poll_init(struct vhost_poll *poll, vhost_work_fn_t fn,
 		     __poll_t mask, struct vhost_dev *dev);
+#endif
+
 int vhost_poll_start(struct vhost_poll *poll, struct file *file);
 void vhost_poll_stop(struct vhost_poll *poll);
 void vhost_poll_queue(struct vhost_poll *poll);
+
+void vhost_work_init(struct vhost_work *work, vhost_work_fn_t fn);
 void vhost_dev_flush(struct vhost_dev *dev);
 
 struct vhost_log {
@@ -74,6 +100,9 @@ struct vhost_vring_call {
 /* The virtqueue structure describes a queue attached to a device. */
 struct vhost_virtqueue {
 	struct vhost_dev *dev;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0))
+	struct vhost_worker __rcu *worker;
+#endif
 
 	/* The actual ring of buffers. */
 	struct mutex mutex;
@@ -158,7 +187,9 @@ struct vhost_dev {
 	struct vhost_virtqueue **vqs;
 	int nvqs;
 	struct eventfd_ctx *log_ctx;
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 5, 0))
 	struct vhost_worker *worker;
+#endif
 	struct vhost_iotlb *umem;
 	struct vhost_iotlb *iotlb;
 	spinlock_t iotlb_lock;
@@ -168,6 +199,9 @@ struct vhost_dev {
 	int iov_limit;
 	int weight;
 	int byte_weight;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0))
+	struct xarray worker_xa;
+#endif
 	bool use_worker;
 	int (*msg_handler)(struct vhost_dev *dev, u32 asid,
 			   struct vhost_iotlb_msg *msg);
@@ -188,6 +222,10 @@ void vhost_dev_cleanup(struct vhost_dev *);
 void vhost_dev_stop(struct vhost_dev *);
 long vhost_dev_ioctl(struct vhost_dev *, unsigned int ioctl, void __user *argp);
 long vhost_vring_ioctl(struct vhost_dev *d, unsigned int ioctl, void __user *argp);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0))
+long vhost_worker_ioctl(struct vhost_dev *dev, unsigned int ioctl,
+			void __user *argp);
+#endif
 bool vhost_vq_access_ok(struct vhost_virtqueue *vq);
 bool vhost_log_access_ok(struct vhost_dev *);
 void vhost_clear_msg(struct vhost_dev *dev);
@@ -198,6 +236,11 @@ int vhost_get_vq_desc(struct vhost_virtqueue *,
 		      struct vhost_log *log, unsigned int *log_num);
 void vhost_discard_vq_desc(struct vhost_virtqueue *, int n);
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0))
+void vhost_vq_flush(struct vhost_virtqueue *vq);
+bool vhost_vq_work_queue(struct vhost_virtqueue *vq, struct vhost_work *work);
+bool vhost_vq_has_work(struct vhost_virtqueue *vq);
+#endif
 bool vhost_vq_is_setup(struct vhost_virtqueue *vq);
 int vhost_vq_init_access(struct vhost_virtqueue *);
 int vhost_add_used(struct vhost_virtqueue *, unsigned int head, int len);
@@ -236,11 +279,19 @@ int vhost_init_device_iotlb(struct vhost_dev *d);
 void vhost_iotlb_map_free(struct vhost_iotlb *iotlb,
 			  struct vhost_iotlb_map *map);
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0))
+#define vq_err(vq, fmt, ...) do {                                  \
+		pr_debug(pr_fmt(fmt), ##__VA_ARGS__);       \
+		if ((vq)->error_ctx)                               \
+				eventfd_signal((vq)->error_ctx);\
+	} while (0)
+#else
 #define vq_err(vq, fmt, ...) do {                                  \
 		pr_debug(pr_fmt(fmt), ##__VA_ARGS__);       \
 		if ((vq)->error_ctx)                               \
 				eventfd_signal((vq)->error_ctx, 1);\
 	} while (0)
+#endif
 
 enum {
 	VHOST_FEATURES = (1ULL << VIRTIO_F_NOTIFY_ON_EMPTY) |
