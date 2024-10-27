@@ -497,6 +497,7 @@ static int habmem_add_export_compress(struct virtual_channel *vchan,
 		goto err_compress_pfns;
 	}
 
+	exp_super->payload_size = *payload_size;
 	*export_id = export->export_id;
 	return 0;
 
