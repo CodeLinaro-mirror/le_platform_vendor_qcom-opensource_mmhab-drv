@@ -11,8 +11,22 @@
 #define VFIO_DEV_DT_NAME "vfio_"
 
 enum hab_page_list_type {
+	/*
+	 * Use this type when dmabuf is created by habmm_import()
+	 */
 	HAB_PAGE_LIST_IMPORT = 0x1,
-	HAB_PAGE_LIST_EXPORT
+	/*
+	 * Use this type when dmabuf is created when hab_mem_export() is called
+	 * with the "kernel" parameter is TRUE and w/o HABMM_EXPIMP_FLAGS_DMABUF
+	 * and HABMM_EXPIMP_FLAGS_FD flag
+	 */
+	HAB_PAGE_LIST_EXPORT_KERNEL,
+	/*
+	 * Use this type when dmabuf is created when hab_mem_export() is called
+	 * with the "kernel" parameter is FALSE and w/o HABMM_EXP_MEM_TYPE_DMA
+	 * and HABMM_EXPIMP_FLAGS_FD flag
+	 */
+	HAB_PAGE_LIST_EXPORT_USER
 };
 
 struct pages_list {
@@ -156,6 +170,7 @@ static void pages_list_remove(struct pages_list *pglist)
 
 static void pages_list_destroy(struct kref *refcount)
 {
+	int i = 0;
 	struct pages_list *pglist = container_of(refcount,
 				struct pages_list, refcount);
 
@@ -167,6 +182,10 @@ static void pages_list_destroy(struct kref *refcount)
 	/* the imported pages used, notify the remote */
 	if (pglist->type == HAB_PAGE_LIST_IMPORT)
 		pages_list_remove(pglist);
+	else if (pglist->type == HAB_PAGE_LIST_EXPORT_USER) {
+		for (i = 0; i < pglist->npages; i++)
+			put_page(pglist->pages[i]);
+	}
 
 	vfree(pglist->pages);
 
@@ -258,7 +277,7 @@ static struct dma_buf *habmem_get_dma_buf_from_uva(unsigned long address,
 		int page_count)
 {
 	struct page **pages = NULL;
-	int i, ret = 0;
+	int i, page_count_pinned, ret = 0;
 	struct dma_buf *dmabuf = NULL;
 	struct pages_list *pglist = NULL;
 	DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
@@ -278,14 +297,14 @@ static struct dma_buf *habmem_get_dma_buf_from_uva(unsigned long address,
 	mmap_read_lock(current->mm);
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0))
-        ret = get_user_pages(address, page_count, 0, pages);
+	page_count_pinned = get_user_pages(address, page_count, 0, pages);
 #else
-	ret = get_user_pages(address, page_count, 0, pages, NULL);
+	page_count_pinned = get_user_pages(address, page_count, 0, pages, NULL);
 #endif
 
 	mmap_read_unlock(current->mm);
 
-	if (ret <= 0) {
+	if (page_count_pinned <= 0) {
 		ret = -EINVAL;
 		pr_err("get %d user pages failed %d\n",
 			page_count, ret);
@@ -293,8 +312,8 @@ static struct dma_buf *habmem_get_dma_buf_from_uva(unsigned long address,
 	}
 
 	pglist->pages = pages;
-	pglist->npages = page_count;
-	pglist->type = HAB_PAGE_LIST_EXPORT;
+	pglist->npages = page_count_pinned;
+	pglist->type = HAB_PAGE_LIST_EXPORT_USER;
 
 	kref_init(&pglist->refcount);
 
@@ -599,7 +618,7 @@ int habmem_hyp_grant(struct virtual_channel *vchan,
 
 		pglist->pages = pages;
 		pglist->npages = page_count;
-		pglist->type = HAB_PAGE_LIST_EXPORT;
+		pglist->type = HAB_PAGE_LIST_EXPORT_KERNEL;
 		pglist->pchan = vchan->pchan;
 		pglist->vcid = vchan->id;
 
