@@ -199,6 +199,8 @@ void hab_vchan_stop_notify(struct virtual_channel *vchan)
 static int hab_vchans_per_pchan_empty(struct physical_channel *pchan)
 {
 	int empty;
+	struct timespec64 tsnow = {0};
+	static struct timespec64 tslast = {0};
 
 	read_lock(&pchan->vchans_lock);
 	empty = list_empty(&pchan->vchannels);
@@ -210,13 +212,18 @@ static int hab_vchans_per_pchan_empty(struct physical_channel *pchan)
 			/* discount open-pending unpaired vchan */
 			if (!vchan->session_id)
 				vcnt--;
-			else
-				pr_err("vchan %pK name %s %x rm %x sn %d rf %d clsd %d rm clsd %d\n",
-					vchan, vchan->pchan->name, vchan->id,
-					vchan->otherend_id,
-					vchan->session_id,
-					get_refcnt(vchan->refcount),
-					vchan->closed, vchan->otherend_closed);
+			else {
+				ktime_get_ts64(&tsnow);
+				if ((tsnow.tv_sec - tslast.tv_sec) > 1) {
+					pr_err("vchan %pK name %s %x rm %x sn %d rf %d clsd %d rm clsd %d\n",
+						vchan, vchan->pchan->name, vchan->id,
+						vchan->otherend_id,
+						vchan->session_id,
+						get_refcnt(vchan->refcount),
+						vchan->closed, vchan->otherend_closed);
+					tslast = tsnow;
+				}
+			}
 		}
 		if (!vcnt)
 			empty = 1;/* unpaired vchan can exist at init time */
@@ -275,7 +282,7 @@ void hab_vchans_empty_wait_pchan(struct physical_channel *pchan)
         pr_debug("waiting for vchan's sockets closure for %s\n", pchan->name);
 
         while (!hab_vchans_per_pchan_empty(pchan))
-                usleep_range(10000, 12000);
+                msleep(999);
 
         pr_debug("all of vchan's sockets are closed for %s\n", pchan->name);
 }
