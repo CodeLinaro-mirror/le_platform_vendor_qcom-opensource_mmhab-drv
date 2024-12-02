@@ -35,7 +35,7 @@
  * In buffer size defined in FE side
  * TODO: utilize virtio feature bits to negotiate the size
  */
-#define IN_BUF_SIZE 5120
+#define IN_BUF_SIZE 5120U
 
 #define FIRST_LA_GVM_VMID 2
 
@@ -58,8 +58,8 @@ struct vhost_hab_pchannel { /* per pchan */
 	struct mutex send_list_mutex; /* protect send_list */
 	struct vhost_work rx_send_work;
 
-	int tx_empty; /* cached value for out of context access */
-	int rx_empty; /* ditto */
+	bool tx_empty; /* cached value for out of context access */
+	bool rx_empty; /* ditto */
 };
 
 struct vhost_hab_send_node {
@@ -149,12 +149,13 @@ static void tx_worker(struct vhost_hab_pchannel *vh_pchan)
 	struct vhost_virtqueue *vq = vh_pchan->vqs + VHOST_HAB_PCHAN_TX_VQ;
 	struct vhost_hab_dev *vh_dev = container_of(vq->dev,
 						struct vhost_hab_dev, dev);
-	unsigned int out_num = 0, in_num = 0;
+	unsigned int out_num = 0U, in_num = 0U;
 	int head, ret;
 	size_t out_len, in_len, total_len = 0;
 	ssize_t copy_size;
 	struct hab_header header;
 	unsigned int policy = current->policy;
+	int prio = MAX_RT_PRIO / 2 - 1;
 	struct sched_attr attr = {
 		.sched_policy = SCHED_FIFO,
 		/*
@@ -168,16 +169,16 @@ static void tx_worker(struct vhost_hab_pchannel *vh_pchan)
 		 * Thus, HAB Vhost worker shall use lower priority to prevent from
 		 * preempting above three entities.
 		 */
-		.sched_priority = MAX_RT_PRIO / 2 - 1,
+		.sched_priority = (uint32_t)prio,
 	};
 
-	if (policy == SCHED_NORMAL)
-		sched_setattr_nocheck(current, &attr);
+	if (policy == (uint32_t)SCHED_NORMAL)
+		(void)sched_setattr_nocheck(current, &attr);
 
 	trace_hab_txworker_start(vh_pchan->pchan);
 
 	mutex_lock(&vq->mutex);
-	if (!vq->private_data) {
+	if (vq->private_data == NULL) {
 		mutex_unlock(&vq->mutex);
 		return;
 	}
@@ -188,7 +189,7 @@ static void tx_worker(struct vhost_hab_pchannel *vh_pchan)
 		head = vhost_get_vq_desc(vq, vq->iov, ARRAY_SIZE(vq->iov),
 					 &out_num, &in_num, NULL, NULL);
 
-		if (head == vq->num) {
+		if ((uint32_t)head == vq->num) {
 			if (unlikely(vhost_enable_notify(&vh_dev->dev, vq))) {
 				vhost_disable_notify(&vh_dev->dev, vq);
 				continue;
@@ -202,10 +203,10 @@ static void tx_worker(struct vhost_hab_pchannel *vh_pchan)
 
 		out_len = iov_length(vq->iov, out_num);
 
-		if ((out_num > 0) && (out_len > 0)) {
+		if ((out_num > 0U) && (out_len > 0U)) {
 			iov_iter_init(&vh_pchan->out_iter, WRITE, vq->iov,
 						out_num, out_len);
-			copy_size = copy_from_iter(&header, sizeof(header),
+			copy_size = (ssize_t)copy_from_iter(&header, sizeof(header),
 						&vh_pchan->out_iter);
 			if (unlikely(copy_size != sizeof(header)))
 				pr_err("fault on copy_from_iter, out_len %lu, ret %lu\n",
@@ -213,24 +214,24 @@ static void tx_worker(struct vhost_hab_pchannel *vh_pchan)
 
 			trace_hab_pchan_recv_start(vh_pchan->pchan);
 			ret = hab_msg_recv(vh_pchan->pchan, &header);
-			if (ret && (ret != -EINVAL))
+			if ((ret != 0 ) && (ret != -EINVAL))
 				pr_err("hab_msg_recv error %d on %s\n", ret, vh_pchan->pchan->name);
 
 			total_len += out_len;
-			if (vh_pchan->pchan->sequence_rx + 1 != header.sequence)
+			if (vh_pchan->pchan->sequence_rx + 1U != header.sequence)
 				pr_err("%s: pvm sequence_rx is %d, msg seq is %d\n",
 						vh_pchan->pchan->name, vh_pchan->pchan->sequence_rx, header.sequence);
 			vh_pchan->pchan->sequence_rx = header.sequence;
 		}
 
-		if (in_num) {
+		if (in_num != 0U) {
 			in_len = iov_length(&vq->iov[out_num], in_num);
 			total_len += in_len;
 			pr_warn("unexpected in buf in tx vq, in_num %d, in_len %lu\n",
 				in_num, in_len);
 		}
 
-		vhost_add_used_and_signal(&vh_dev->dev, vq, head, 0);
+		vhost_add_used_and_signal(&vh_dev->dev, vq, (uint32_t)head, 0);
 		if (unlikely(vhost_exceeds_weight(vq, 0, total_len))) {
 			pr_err("total_len %lu > hab vq weight %d\n",
 					total_len, VHOST_HAB_WEIGHT);
@@ -278,13 +279,13 @@ static int vhost_hab_open(struct inode *inode, struct file *f)
 	struct vhost_hab_pchannel *vh_pchan, *vh_pchan_t;
 	struct vhost_virtqueue **vqs;
 	struct hab_device *habdev;
-	int num_pchan = 0;
+	int num_pchan = 0, total_vq_num;
 	bool vh_pchan_found;
 	int i, j = 0;
 	int ret;
 
 	vh_dev = kzalloc(sizeof(*vh_dev), GFP_KERNEL);
-	if (!vh_dev)
+	if (vh_dev == NULL)
 		return -ENOMEM;
 
 	vh_dev->vmid = vh_cdev->vmid;
@@ -296,7 +297,7 @@ static int vhost_hab_open(struct inode *inode, struct file *f)
 			break;
 
 		pr_info("%s: i=%d, mmid=%d\n", __func__, i, habdev->id);
-		vh_pchan_found = false;
+		vh_pchan_found = (bool)false;
 		list_for_each_entry_safe(vh_pchan, vh_pchan_t,
 					&g_vh.vh_pchan_list, node) {
 
@@ -309,7 +310,7 @@ static int vhost_hab_open(struct inode *inode, struct file *f)
 					__func__, habdev->id);
 				list_move_tail(&vh_pchan->node,
 						&vh_dev->vh_pchan_list);
-				vh_pchan_found = true;
+				vh_pchan_found = (bool)true;
 				pr_debug("%s: num_pchan %d\n", __func__,
 					num_pchan);
 				num_pchan++;
@@ -325,9 +326,10 @@ static int vhost_hab_open(struct inode *inode, struct file *f)
 		}
 	}
 
-	vqs = kmalloc_array(num_pchan * VHOST_HAB_PCHAN_VQ_MAX, sizeof(*vqs),
+	total_vq_num = num_pchan * VHOST_HAB_PCHAN_VQ_MAX;
+	vqs = kmalloc_array((uint32_t)total_vq_num, sizeof(*vqs),
 								GFP_KERNEL);
-	if (!vqs) {
+	if (vqs == NULL) {
 		ret = -ENOMEM;
 		goto err;
 	}
@@ -341,7 +343,7 @@ static int vhost_hab_open(struct inode *inode, struct file *f)
 
 	vhost_dev_init(&vh_dev->dev, vqs, VHOST_HAB_PCHAN_VQ_MAX * num_pchan,
 			UIO_MAXIOV, VHOST_HAB_PKT_WEIGHT,
-			VHOST_HAB_WEIGHT, true, NULL);
+			VHOST_HAB_WEIGHT, (bool)true, NULL);
 
 	list_for_each_entry(vh_pchan, &vh_dev->vh_pchan_list, node) {
 		vhost_work_init(&vh_pchan->rx_send_work, do_rx_send_work);
@@ -429,7 +431,7 @@ static int vhost_hab_release(struct inode *inode, struct file *f)
 	mutex_lock(&g_vh.pchan_mutex);
 	list_for_each_entry_safe(vh_pchan, vh_pchan_t,
 				&vh_dev->vh_pchan_list, node) {
-		if (vh_pchan->pchan) {
+		if (vh_pchan->pchan != NULL) {
 			/* reset the seq_rx here */
 			vh_pchan->pchan->sequence_rx = 0;
 			vh_pchan->pchan->sequence_tx = 0;
@@ -447,45 +449,41 @@ static int vhost_hab_release(struct inode *inode, struct file *f)
 static long vhost_hab_ready_check(struct vhost_hab_dev *vh_dev)
 {
 	struct vhost_virtqueue *vq;
-	int r, index;
+	long ret;
+	int index;
 
 	mutex_lock(&vh_dev->dev.mutex);
-	r = vhost_dev_check_owner(&vh_dev->dev);
-	if (r)
-		goto err;
+	ret = vhost_dev_check_owner(&vh_dev->dev);
+	if (ret == 0)
+		for (index = 0; index < vh_dev->dev.nvqs; ++index) {
+			vq = vh_dev->dev.vqs[index];
+			/* Verify that ring has been setup correctly. */
+			if (!vhost_vq_access_ok(vq)) {
+				ret = -EFAULT;
+				break;
+			}
 
-	for (index = 0; index < vh_dev->dev.nvqs; ++index) {
-		vq = vh_dev->dev.vqs[index];
-		/* Verify that ring has been setup correctly. */
-		if (!vhost_vq_access_ok(vq)) {
-			r = -EFAULT;
-			goto err;
-		}
+			if (vq->kick == NULL) {
+				ret = -EFAULT;
+				break;
+			}
 
-		if (vq->kick == NULL) {
-			r = -EFAULT;
-			goto err;
+			if (vq->call_ctx.ctx == NULL) {
+				ret = -EFAULT;
+				break;
+			}
 		}
-
-		if (vq->call_ctx.ctx == NULL) {
-			r = -EFAULT;
-			goto err;
-		}
-	}
 
 	mutex_unlock(&vh_dev->dev.mutex);
-	return 0;
-
-err:
-	mutex_unlock(&vh_dev->dev.mutex);
-	return r;
+	return ret;
 }
 
 static long vhost_hab_run(struct vhost_hab_dev *vh_dev, int start)
 {
 	struct vhost_virtqueue *vq;
 	struct vhost_hab_pchannel *vh_pchan;
-	int r = 0, i, ret = 0, not_started = 0;
+	int i, ret = 0, not_started = 0;
+	long r = 0;
 
 	pr_info("vh_dev start %d\n", start);
 	if (start < 0 || start > 1)
@@ -499,7 +497,7 @@ static long vhost_hab_run(struct vhost_hab_dev *vh_dev, int start)
 	}
 
 	r = vhost_dev_check_owner(&vh_dev->dev);
-	if (r)
+	if (r != 0)
 		goto exit;
 
 	for (i = 0; i < vh_dev->dev.nvqs; ++i) {
@@ -517,13 +515,13 @@ static long vhost_hab_run(struct vhost_hab_dev *vh_dev, int start)
 		for (i = 0; i < VHOST_HAB_PCHAN_VQ_MAX; i++) {
 			vq = vh_pchan->vqs + i;
 
-			if (vq->private_data)
+			if (vq->private_data != NULL)
 				continue; /* already started */
 
 			mutex_lock(&vq->mutex);
 			vq->private_data = vh_pchan;
 			r = vhost_vq_init_access(vq); /* poll need retry */
-			if (r) {
+			if (r != 0) {
 				vq->private_data = NULL;
 				not_started += 1;
 				pr_warn("%s vq %d not ready %d total %d\n",
@@ -574,10 +572,10 @@ static long vhost_hab_reset_owner(struct vhost_hab_dev *vh_dev)
 
 	mutex_lock(&vh_dev->dev.mutex);
 	err = vhost_dev_check_owner(&vh_dev->dev);
-	if (err)
+	if (err != 0)
 		goto done;
 	umem = vhost_dev_reset_owner_prepare();
-	if (!umem) {
+	if (umem == NULL) {
 		err = -ENOMEM;
 		goto done;
 	}
@@ -596,7 +594,7 @@ static int vhost_hab_set_features(struct vhost_hab_dev *vh_dev, u64 features)
 	int i;
 
 	mutex_lock(&vh_dev->dev.mutex);
-	if ((features & (1U << VHOST_F_LOG_ALL)) &&
+	if (((features & (1U << VHOST_F_LOG_ALL)) != (uint64_t)0) &&
 	    !vhost_log_access_ok(&vh_dev->dev)) {
 		mutex_unlock(&vh_dev->dev.mutex);
 		return -EFAULT;
@@ -629,18 +627,18 @@ static long vhost_hab_ioctl(struct file *f, unsigned int ioctl,
 	void __user *argp = (void __user *)arg;
 	u64 features;
 	struct vhost_config config;
-	int r = 0;
+	long r = 0;
 
 	switch (ioctl) {
 	case VHOST_RESET_OWNER:
 		r = vhost_hab_reset_owner(vh_dev);
 		break;
 	case VHOST_SET_FEATURES:
-		if (copy_from_user(&features, argp, sizeof(features))) {
+		if (copy_from_user(&features, argp, sizeof(features)) != 0U) {
 			r = -EFAULT;
 			break;
 		}
-		if (features & ~VHOST_FEATURES) {
+		if ((features & ~VHOST_FEATURES) != 0U) {
 			r = -EOPNOTSUPP;
 			break;
 		}
@@ -651,7 +649,7 @@ static long vhost_hab_ioctl(struct file *f, unsigned int ioctl,
 		break;
 	case VHOST_GET_FEATURES:
 		features = VHOST_FEATURES;
-		if (copy_to_user(argp, &features, sizeof(features))) {
+		if (copy_to_user(argp, &features, sizeof(features)) != 0U) {
 			r = -EFAULT;
 			break;
 		}
@@ -695,11 +693,11 @@ static long vhost_hab_compat_ioctl(struct file *f, unsigned int ioctl,
 
 int hab_hypervisor_register(void)
 {
-	uint32_t max_devices = HABCFG_MMID_AREA_MAX + 1;
+	int32_t max_devices = HABCFG_MMID_AREA_MAX + 1;
 	dev_t dev_no;
 	int ret;
 
-	ret = alloc_chrdev_region(&dev_no, 0, max_devices, "vhost-msm");
+	ret = alloc_chrdev_region(&dev_no, 0, (uint32_t)max_devices, "vhost-msm");
 	if (ret < 0) {
 		pr_err("alloc_chrdev_region failed: %d\n", ret);
 		return ret;
@@ -710,15 +708,15 @@ int hab_hypervisor_register(void)
 	g_vh.class = class_create("vhost-msm");
 	if (IS_ERR_OR_NULL(g_vh.class)) {
 		pr_err("class_create failed\n");
-		unregister_chrdev_region(g_vh.major, max_devices);
-		return g_vh.class ? PTR_ERR(g_vh.class) : -ENOMEM;
+		unregister_chrdev_region(g_vh.major, (uint32_t)max_devices);
+		return (g_vh.class != NULL) ? (int)PTR_ERR(g_vh.class) : -ENOMEM;
 	}
 
 	g_vh.wq = create_singlethread_workqueue("hab_vhost_wq");
-	if (!g_vh.wq) {
+	if (g_vh.wq == NULL) {
 		pr_err("create workqueue failed\n");
 		class_destroy(g_vh.class);
-		unregister_chrdev_region(g_vh.major, max_devices);
+		unregister_chrdev_region(g_vh.major, (uint32_t)max_devices);
 		return -EINVAL;
 	}
 
@@ -729,7 +727,7 @@ int hab_hypervisor_register(void)
 
 void hab_hypervisor_unregister(void)
 {
-	uint32_t max_devices = HABCFG_MMID_AREA_MAX + 1;
+	int32_t max_devices = HABCFG_MMID_AREA_MAX + 1;
 	struct vhost_hab_pchannel *n, *vh_pchan;
 
 	list_for_each_entry_safe(vh_pchan, n, &g_vh.vh_pchan_list, node) {
@@ -739,7 +737,7 @@ void hab_hypervisor_unregister(void)
 		 * ideally hab_pchan_free should not free hyp_data because it
 		 * is not allocated by hab_pchan_alloc.
 		 */
-		if (vh_pchan->pchan)
+		if (vh_pchan->pchan != NULL)
 			vh_pchan->pchan->hyp_data = NULL;
 
 		list_del(&vh_pchan->node);
@@ -755,7 +753,7 @@ void hab_hypervisor_unregister(void)
 	destroy_workqueue(g_vh.wq);
 
 	class_destroy(g_vh.class);
-	unregister_chrdev_region(g_vh.major, max_devices);
+	unregister_chrdev_region(g_vh.major, (uint32_t)max_devices);
 }
 
 void hab_pipe_read_dump(struct physical_channel *pchan) {};
@@ -782,7 +780,7 @@ static int get_rx_buf_locked(struct vhost_dev *dev,
 			break;
 		}
 
-		if (*head == vq->num) {
+		if ((uint32_t)*head == vq->num) {
 			pr_debug("rx buf %s underrun, vq avail %d\n",
 				vh_pchan->pchan->name,
 				vhost_vq_avail_empty(dev, vq));
@@ -804,9 +802,9 @@ static int get_rx_buf_locked(struct vhost_dev *dev,
 					out_num, *out_len);
 		}
 
-		if (in_num) {
+		if (in_num != 0U) {
 			*in_len = iov_length(&vq->iov[out_num], in_num);
-			if (*in_len > 0)
+			if (*in_len > 0U)
 				iov_iter_init(in_iter, READ, &vq->iov[out_num],
 						in_num, *in_len);
 			else {
@@ -824,11 +822,11 @@ static int get_rx_buf_locked(struct vhost_dev *dev,
 	return ret;
 }
 
-static ssize_t fill_rx_buf(void **pbuf, size_t *remain_size,
+static int fill_rx_buf(void **pbuf, size_t *remain_size,
 			struct iov_iter *in_iter, size_t in_len,
 			size_t *size_filled)
 {
-	ssize_t copy_size, copy_size_ret;
+	size_t copy_size, copy_size_ret;
 
 	if (unlikely(in_len < *remain_size))
 		copy_size = in_len;
@@ -861,18 +859,19 @@ static int rx_send_one_node_locked(struct vhost_dev *dev,
 	void *data = header;
 	size_t remain_size = sizeof(*header) + HAB_HEADER_GET_SIZE(*header);
 	size_t out_len, in_len, total_len = 0;
+	int64_t tx_usec_tmp;
 
 	size_t size_filled;
 	struct iov_iter in_iter;
 	int ret = 0;
 
-	while (remain_size > 0) {
+	while (remain_size > 0U) {
 		out_len = 0;
 		in_len = 0;
 
 		ret = get_rx_buf_locked(dev, vh_pchan, &in_iter, &in_len,
 					&out_len, &head);
-		if (ret) {
+		if (ret != 0) {
 			if (ret != -EAGAIN)
 				pr_info("%s failed to get one rx-buf ret %d\n",
 					vh_pchan->pchan->name, ret);
@@ -882,7 +881,7 @@ static int rx_send_one_node_locked(struct vhost_dev *dev,
 		total_len += in_len + out_len;
 		size_filled = 0;
 
-		if (in_len) {
+		if (in_len != 0U) {
 			if (HAB_HEADER_GET_TYPE(send_node->header) ==
 				HAB_PAYLOAD_TYPE_PROFILE) {
 				struct habmm_xing_vm_stat *pstat =
@@ -891,8 +890,9 @@ static int rx_send_one_node_locked(struct vhost_dev *dev,
 				struct timespec64 ts = {0};
 
 				ktime_get_ts64(&ts);
-				pstat->tx_sec = ts.tv_sec;
-				pstat->tx_usec = ts.tv_nsec/NSEC_PER_USEC;
+				pstat->tx_sec = (uint64_t)ts.tv_sec;
+				tx_usec_tmp = ts.tv_nsec/NSEC_PER_USEC;
+				pstat->tx_usec = (uint64_t)tx_usec_tmp;
 			}
 
 			header->sequence = ++vh_pchan->pchan->sequence_tx;
@@ -901,11 +901,11 @@ static int rx_send_one_node_locked(struct vhost_dev *dev,
 			ret = fill_rx_buf((void **)(&data),
 					&remain_size,
 					&in_iter, in_len, &size_filled);
-			if (ret)
+			if (ret != 0)
 				break;
 
-			ret = vhost_add_used(vq, head, size_filled);
-			if (ret) {
+			ret = vhost_add_used(vq, (uint32_t)head, (int32_t)size_filled);
+			if (ret != 0) {
 				pr_err("%s failed to add used ret %d head %d size %d\n",
 					vh_pchan->pchan->name, ret, head, size_filled);
 				break;
@@ -936,39 +936,40 @@ static void rx_worker(struct vhost_hab_pchannel *vh_pchan)
 	struct vhost_dev *dev = vq->dev;
 	int ret = 0, has_send = 1, added = 0;
 	unsigned int policy = current->policy;
+	int prio = MAX_RT_PRIO / 2 - 1;
 	struct sched_attr attr = {
 		.sched_policy = SCHED_FIFO,
 		/* refer tx_worker's priority and sched policy */
-		.sched_priority = MAX_RT_PRIO / 2 - 1,
+		.sched_priority = (uint32_t)prio,
 	};
 
-	if (policy == SCHED_NORMAL)
-		sched_setattr_nocheck(current, &attr);
+	if (policy == (uint32_t)SCHED_NORMAL)
+		(void)sched_setattr_nocheck(current, &attr);
 
 	trace_hab_rxworker_start(vh_pchan->pchan);
 
 	mutex_lock(&vq->mutex);
 
 	vh_pchan = vq->private_data;
-	if (!vh_pchan) {
+	if (vh_pchan == NULL) {
 		pr_err("rx vq is not ready yet\n");
 		goto err_unlock;
 	}
 
 	vhost_disable_notify(dev, vq); /* no notify by default */
 
-	while (has_send) {
+	while (has_send == 1) {
 		mutex_lock(&vh_pchan->send_list_mutex);
 		send_node = list_first_entry_or_null(&vh_pchan->send_list,
 					struct vhost_hab_send_node, node);
 		mutex_unlock(&vh_pchan->send_list_mutex);
 
-		if (!send_node) {
+		if (send_node == NULL) {
 			has_send = 0; /* completed send list wait for more */
 		} else {
 			ret = rx_send_one_node_locked(dev, vh_pchan, vq,
 							send_node, &added);
-			if (ret)
+			if (ret != 0)
 				break; /* no more rx buf wait for next round */
 
 			mutex_lock(&vh_pchan->send_list_mutex);
@@ -979,7 +980,7 @@ static void rx_worker(struct vhost_hab_pchannel *vh_pchan)
 		}
 	}
 
-	if (added)
+	if (added != 0)
 		vhost_signal(dev, vq);
 
 	trace_hab_rxworker_end(vh_pchan->pchan);
@@ -1000,7 +1001,7 @@ int physical_channel_send(struct physical_channel *pchan,
 	struct vhost_hab_send_node *send_node;
 	size_t sizebytes = HAB_HEADER_GET_SIZE(*header);
 
-	if (!vh_pchan) {
+	if (vh_pchan == NULL) {
 		pr_err("pchan is not ready yet\n");
 		return -ENODEV;
 	}
@@ -1025,11 +1026,11 @@ int physical_channel_send(struct physical_channel *pchan,
 
 	send_node = kmalloc(sizebytes + sizeof(struct vhost_hab_send_node),
 				GFP_KERNEL);
-	if (!send_node)
+	if (send_node == NULL)
 		return -ENOMEM;
 
 	send_node->header = *header;
-	if (sizebytes)
+	if (sizebytes != 0U)
 		(void)memcpy(send_node->payload, payload, sizebytes);
 
 	mutex_lock(&vh_pchan->send_list_mutex);
@@ -1050,9 +1051,9 @@ int physical_channel_read(struct physical_channel *pchan,
 						size_t read_size)
 {
 	struct vhost_hab_pchannel *vh_pchan = pchan->hyp_data;
-	ssize_t copy_size;
+	size_t copy_size;
 
-	if (!vh_pchan) {
+	if (vh_pchan == NULL) {
 		pr_err("pchan is not ready yet\n");
 		return -ENODEV;
 	}
@@ -1062,7 +1063,7 @@ int physical_channel_read(struct physical_channel *pchan,
 		pr_err("fault on copy_from_iter, read_size %lu, ret %lu\n",
 			read_size, copy_size);
 
-	return copy_size;
+	return (int)copy_size;
 }
 
 void physical_channel_rx_dispatch(unsigned long physical_channel)
@@ -1073,7 +1074,7 @@ void physical_channel_rx_dispatch(unsigned long physical_channel)
 	struct vhost_virtqueue *vq;
 	struct vhost_hab_dev *vh_dev;
 
-	if (!vh_pchan) {
+	if (vh_pchan == NULL) {
 		pr_err("pchan is not ready yet\n");
 		return;
 	}
@@ -1104,7 +1105,7 @@ static struct vhost_hab_cdev *get_cdev(uint32_t domain_id, int vmid_remote)
 	struct vhost_hab_cdev *vh_cdev;
 	int ret;
 
-	vh_cdev = vh->vh_cdevs[(HABCFG_MMID_AREA_MAX + 1) * vmid_remote + domain_id];
+	vh_cdev = vh->vh_cdevs[(HABCFG_MMID_AREA_MAX + 1) * vmid_remote + (int)domain_id];
 	if (vh_cdev != NULL)
 		return vh_cdev;
 
@@ -1123,7 +1124,7 @@ static struct vhost_hab_cdev *get_cdev(uint32_t domain_id, int vmid_remote)
 	 */
 	vh_cdev->dev_no = MKDEV(vh->major, (HABCFG_MMID_AREA_MAX + 1) * vmid_remote + domain_id);
 	ret = cdev_add(&vh_cdev->cdev, vh_cdev->dev_no, 1);
-	if (ret) {
+	if (ret != 0) {
 		pr_err("cdev_add failed for dev_no %d, domain_id %d\n",
 			vh_cdev->dev_no, domain_id);
 		goto err_free_cdev;
@@ -1146,7 +1147,7 @@ static struct vhost_hab_cdev *get_cdev(uint32_t domain_id, int vmid_remote)
 	vh_cdev->domain_id = domain_id;
 	vh_cdev->vmid = vmid_remote;
 
-	vh->vh_cdevs[(HABCFG_MMID_AREA_MAX + 1) * vmid_remote + domain_id] = vh_cdev;
+	vh->vh_cdevs[(HABCFG_MMID_AREA_MAX + 1) * vmid_remote + (int)domain_id] = vh_cdev;
 
 	return vh_cdev;
 
@@ -1163,11 +1164,11 @@ static void del_hab_device_from_cdev(uint32_t mmid, struct hab_device *habdev,
 {
 	struct vhost_hab *vh = &g_vh;
 	struct vhost_hab_cdev *vh_cdev;
-	uint32_t domain_id = mmid / 100;
-	bool destroy = true;
+	uint32_t domain_id = mmid / (uint32_t)100;
+	bool destroy = (bool)true;
 	int i;
 
-	vh_cdev = vh->vh_cdevs[(HABCFG_MMID_AREA_MAX + 1) * vmid_remote + domain_id];
+	vh_cdev = vh->vh_cdevs[(HABCFG_MMID_AREA_MAX + 1) * vmid_remote + (int)domain_id];
 	if (vh_cdev == NULL) {
 		pr_err("cdev not created for domain %d\n", domain_id);
 		return;
@@ -1176,9 +1177,10 @@ static void del_hab_device_from_cdev(uint32_t mmid, struct hab_device *habdev,
 	for (i = 0; i < HABCFG_MMID_NUM; i++) {
 		if (vh_cdev->habdevs[i] == habdev)
 			vh_cdev->habdevs[i] = NULL;
-		else
+		else {
 			if (vh_cdev->habdevs[i] != NULL)
-				destroy = false;
+				destroy = (bool)false;
+		}
 	}
 
 	/* if no habdev is on this cdev, destroy it */
@@ -1189,7 +1191,7 @@ static void del_hab_device_from_cdev(uint32_t mmid, struct hab_device *habdev,
 	device_destroy(vh->class, vh_cdev->dev_no);
 	cdev_del(&vh_cdev->cdev);
 	kfree(vh_cdev);
-	vh->vh_cdevs[(HABCFG_MMID_AREA_MAX + 1) * vmid_remote + domain_id] = NULL;
+	vh->vh_cdevs[(HABCFG_MMID_AREA_MAX + 1) * vmid_remote + (int)domain_id] = NULL;
 }
 
 static void vhost_hab_cdev_del_hab_device(struct hab_device *habdev, int vmid_remote)
@@ -1229,11 +1231,11 @@ static int vhost_hab_cdev_add_hab_device(struct hab_device *habdev, int vmid_rem
 	int ret;
 
 	ret = add_hab_device_to_cdev(HAB_MMID_ALL_AREA, habdev, vmid_remote);
-	if (ret)
+	if (ret != 0)
 		return ret;
 
 	ret = add_hab_device_to_cdev(habdev->id, habdev, vmid_remote);
-	if (ret)
+	if (ret != 0)
 		del_hab_device_from_cdev(HAB_MMID_ALL_AREA, habdev, vmid_remote);
 
 	return ret;
@@ -1247,7 +1249,7 @@ int habhyp_commdev_alloc(void **commdev, int is_be, char *name,
 	int ret;
 
 	pchan = hab_pchan_alloc(habdev, vmid_remote);
-	if (!pchan) {
+	if (pchan == NULL) {
 		pr_err("failed to create %s pchan in mmid device %s, pchan cnt %d\n",
 			name, habdev->name, habdev->pchan_cnt);
 		*commdev = NULL;
@@ -1264,7 +1266,7 @@ int habhyp_commdev_alloc(void **commdev, int is_be, char *name,
 		name, hab_driver.b_loopback, habdev->pchan_cnt, vmid_remote);
 
 	vh_pchan = kzalloc(sizeof(*vh_pchan), GFP_KERNEL);
-	if (!vh_pchan) {
+	if (vh_pchan == NULL) {
 		hab_pchan_put(pchan);
 		ret = -ENOMEM;
 		*commdev = NULL;
@@ -1278,7 +1280,7 @@ int habhyp_commdev_alloc(void **commdev, int is_be, char *name,
 	INIT_LIST_HEAD(&vh_pchan->send_list);
 
 	ret = vhost_hab_cdev_add_hab_device(habdev, vmid_remote);
-	if (ret) {
+	if (ret != 0) {
 		pr_err("vhost_hab_cdev_add_hab_device failed, vmid %d, mmid %d\n",
 			vmid_remote, habdev->id);
 		goto err_free_vh_pchan;
@@ -1334,7 +1336,7 @@ int hab_stat_log(struct physical_channel **pchans, int pchan_cnt, char *dest,
 	mutex_lock(&g_vh.pchan_mutex);
 	for (i = 0; i < pchan_cnt; i++) {
 		vh_pchan = pchans[i]->hyp_data;
-		if (!vh_pchan) {
+		if (vh_pchan == NULL) {
 			pr_err("%s: pchan %s is not ready\n", __func__,
 				pchans[i]->name);
 			continue;
@@ -1343,7 +1345,7 @@ int hab_stat_log(struct physical_channel **pchans, int pchan_cnt, char *dest,
 				"mmid %d: vq empty tx %d rx %d\n",
 				vh_pchan->habdev->id, vh_pchan->tx_empty,
 				vh_pchan->rx_empty);
-		if (ret)
+		if (ret != 0)
 			break;
 	}
 	mutex_unlock(&g_vh.pchan_mutex);
@@ -1367,7 +1369,7 @@ static void stat_worker(struct work_struct *work)
 	mutex_lock(&g_vh.pchan_mutex);
 	for (i = 0; i < stat_work->pchan_count; i++) {
 		vh_pchan = stat_work->pchans[i]->hyp_data;
-		if (!vh_pchan) {
+		if (vh_pchan == NULL) {
 			pr_err("%s: pchan %s is not ready\n", __func__,
 				stat_work->pchans[i]->name);
 			continue;

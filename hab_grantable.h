@@ -14,7 +14,19 @@ struct compressed_pfns {
 	unsigned long first_pfn;
 	int nregions;
 	struct region {
-		int size;
+		unsigned int size; /* number of the pages in current region */
+		/*
+		 * gap(# of pfn) between the last page of current region and
+		 * the first page of the next region. The gap can be a negative value.
+		 *
+		 * for instance, pfns in region[0]:
+		 * starting pfn: first_pfn
+		 * end pfn: first_pfn + region[0].size - 1
+		 *
+		 * pfns in region[1]:
+		 * starting pfn: first_pfn + region[0].size - 1 + space
+		 * end pfn: above pfn + region[1].size - 1
+		 */
 		int space;
 	} region[];
 };

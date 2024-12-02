@@ -9,7 +9,7 @@ hab_pchan_alloc(struct hab_device *habdev, int otherend_id)
 {
 	struct physical_channel *pchan = kzalloc(sizeof(*pchan), GFP_KERNEL);
 
-	if (!pchan)
+	if (pchan == NULL)
 		return NULL;
 
 	idr_init(&pchan->vchan_idr);
@@ -78,7 +78,7 @@ hab_pchan_find_domid(struct hab_device *dev, int dom_id)
 		pchan = NULL;
 	}
 
-	if (pchan && !kref_get_unless_zero(&pchan->refcount))
+	if ((pchan != NULL) && (kref_get_unless_zero(&pchan->refcount) == 0))
 		pchan = NULL;
 
 	read_unlock_bh(&dev->pchan_lock);
@@ -88,12 +88,12 @@ hab_pchan_find_domid(struct hab_device *dev, int dom_id)
 
 void hab_pchan_get(struct physical_channel *pchan)
 {
-	if (pchan)
+	if (pchan != NULL)
 		kref_get(&pchan->refcount);
 }
 
 void hab_pchan_put(struct physical_channel *pchan)
 {
-	if (pchan)
+	if (pchan != NULL)
 		(void)kref_put(&pchan->refcount, hab_pchan_free);
 }
