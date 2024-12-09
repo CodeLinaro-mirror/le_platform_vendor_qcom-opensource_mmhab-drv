@@ -433,7 +433,6 @@ static int vhost_hab_release(struct inode *inode, struct file *f)
 			/* reset the seq_rx here */
 			vh_pchan->pchan->sequence_rx = 0;
 			vh_pchan->pchan->sequence_tx = 0;
-			hab_pchan_put(vh_pchan->pchan);
 		}
 		list_move_tail(&vh_pchan->node, &g_vh.vh_pchan_list);
 	}
