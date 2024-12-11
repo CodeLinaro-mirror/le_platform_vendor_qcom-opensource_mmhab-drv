@@ -41,8 +41,10 @@ static void hab_pchan_free(struct kref *ref)
 		container_of(ref, struct physical_channel, refcount);
 	struct virtual_channel *vchan;
 
-	pr_debug("pchan %s refcnt %d\n", pchan->name,
-			get_refcnt(pchan->refcount));
+	pr_err("pchan %s (refcnt %u) is freed unexpectedly, \
+			and HAB is broken\n",
+			pchan->name, get_refcnt(pchan->refcount));
+	dump_stack();
 
 	write_lock_bh(&pchan->habdev->pchan_lock);
 	list_del(&pchan->node);
@@ -59,6 +61,10 @@ static void hab_pchan_free(struct kref *ref)
 	}
 	read_unlock(&pchan->vchans_lock);
 
+	/* todo: set any pointer pointing to pchan to NULL,
+	 * eg, pchan->hyp_data->pchan = NULL;
+	 */
+	pchan->hyp_data = NULL;
 	kfree(pchan);
 }
 

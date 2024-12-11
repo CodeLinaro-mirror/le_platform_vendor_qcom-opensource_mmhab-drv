@@ -304,9 +304,29 @@ static int vhost_hab_open(struct inode *inode, struct file *f)
 				vh_pchan->habdev->id);
 
 			if (vh_pchan->habdev == habdev
+				&& vh_pchan->pchan
 				&& vh_pchan->pchan->dom_id == vh_dev->vmid) {
 				pr_debug("%s: find vh_pchan for mmid %d\n",
 					__func__, habdev->id);
+
+				/* increase the refcount before vhost hab will be fully initialized
+				 * very soon for this pchan.
+				 * this refcount increasing will be correspondingly decreased in
+				 * vhost_hab_release.
+				 * todo: actually we need a better way to protect the pchan
+				 *       since we already use the pchan before here
+				 */
+				if (!kref_get_unless_zero(&vh_pchan->pchan->refcount)) {
+					pr_err("failed unexpectedly to get a pchan(refcnt 0),\
+							and probably hitting a UAF\n");
+					/* todo: clear vh_pchan->pchan before free pchan to avoid UAF of pchan
+					 * eg, vh_pchan->pchan->dom_id and vh_pchan->pchan->refcount
+					 */
+					vh_pchan->pchan = NULL;
+					ret = -ENODEV;
+					goto err;
+				}
+
 				list_move_tail(&vh_pchan->node,
 						&vh_dev->vh_pchan_list);
 				vh_pchan_found = true;
@@ -357,8 +377,10 @@ static int vhost_hab_open(struct inode *inode, struct file *f)
 err:
 	/* return vh_pchans back to system */
 	list_for_each_entry_safe(vh_pchan, vh_pchan_t,
-				&vh_dev->vh_pchan_list, node)
+				&vh_dev->vh_pchan_list, node) {
 		list_move_tail(&vh_pchan->node, &g_vh.vh_pchan_list);
+		hab_pchan_put(vh_pchan->pchan);
+	}
 
 	kfree(vh_dev);
 
