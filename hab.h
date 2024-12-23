@@ -138,7 +138,7 @@ struct hab_header {
  * PIPE_SHMEM_SIZE - sizeof(hab_header)
  * 500KB is big enough for now and leave a margin for other usage
  */
-#define HAB_HEADER_SIZE_MAX  0x0007D000
+#define HAB_HEADER_SIZE_MAX  0x0007D000U
 #define HAB_HEADER_TYPE_MASK 0x000F0000
 /* TYPE_LEN is the number of 1 bit in TYPE_MASK */
 #define HAB_HEADER_TYPE_LEN 4
@@ -149,11 +149,11 @@ struct hab_header {
 #define HAB_MMID_GET_MAJOR(mmid) (mmid & 0xFFFF)
 #define HAB_MMID_GET_MINOR(mmid) ((mmid>>16) & 0xFF)
 
-#define HAB_VCID_ID_SHIFT 0
-#define HAB_VCID_DOMID_SHIFT 12
-#define HAB_VCID_MMID_SHIFT 20
-#define HAB_VCID_ID_MASK 0x00000FFF
-#define HAB_VCID_DOMID_MASK 0x000FF000
+#define HAB_VCID_ID_SHIFT 0U
+#define HAB_VCID_DOMID_SHIFT 12U
+#define HAB_VCID_MMID_SHIFT 20U
+#define HAB_VCID_ID_MASK 0x00000FFFU
+#define HAB_VCID_DOMID_MASK 0x000FF000U
 #define HAB_VCID_MMID_MASK 0xFFF00000U
 #define HAB_VCID_GET_ID(vcid) \
 	(((vcid) & HAB_VCID_ID_MASK) >> HAB_VCID_ID_SHIFT)
@@ -248,13 +248,13 @@ struct hab_open_send_data {
 	int vchan_id;
 	int sub_id;
 	int open_id;
-	int ver_fe;
-	int ver_be;
+	unsigned int ver_fe;
+	unsigned int ver_be;
 	int ver_proto;
 };
 
 struct hab_open_request {
-	int type;
+	enum hab_payload_type type;
 	struct physical_channel *pchan;
 	struct hab_open_send_data xdata;
 };
@@ -358,7 +358,7 @@ struct uhab_context {
 	int kernel;
 	int owner;
 
-	int lb_be; /* loopback only */
+	uint32_t lb_be; /* loopback only */
 };
 
 /*
@@ -400,7 +400,7 @@ struct hab_driver {
 	struct local_vmid settings; /* parser results */
 
 	int b_server_dom;
-	int b_loopback_be; /* only allow 2 apps simultaneously 1 fe 1 be */
+	unsigned int b_loopback_be; /* only allow 2 apps simultaneously 1 fe 1 be */
 	int b_loopback;
 
 	void *hyp_priv; /* hypervisor plug-in storage */
@@ -594,13 +594,13 @@ void habmem_remove_export(struct export_desc *exp);
 /* memory hypervisor framework plugin I/F */
 struct export_desc_super *habmem_add_export(
 		struct virtual_channel *vchan,
-		int sizebytes,
+		uint32_t sizebytes,
 		uint32_t flags);
 
 int habmem_hyp_grant_user(struct virtual_channel *vchan,
 		unsigned long address,
-		int page_count,
-		int flags,
+		uint32_t page_count,
+		uint32_t flags,
 		int remotedom,
 		int *compressed,
 		int *compressed_size,
@@ -608,8 +608,8 @@ int habmem_hyp_grant_user(struct virtual_channel *vchan,
 
 int habmem_hyp_grant(struct virtual_channel *vchan,
 		unsigned long address,
-		int page_count,
-		int flags,
+		uint32_t page_count,
+		uint32_t flags,
 		int remotedom,
 		int *compressed,
 		int *compressed_size,
@@ -639,14 +639,14 @@ int hab_msg_recv(struct physical_channel *pchan,
 		struct hab_header *header);
 
 void hab_open_request_init(struct hab_open_request *request,
-		int type,
+		enum hab_payload_type type,
 		struct physical_channel *pchan,
 		int vchan_id,
 		int sub_id,
 		int open_id);
 int hab_open_request_send(struct hab_open_request *request);
 int hab_open_request_add(struct physical_channel *pchan,
-		size_t sizebytes, int request_type);
+		size_t sizebytes, enum hab_payload_type request_type);
 void hab_open_request_free(struct hab_open_request *request);
 int hab_open_listen(struct uhab_context *ctx,
 		struct hab_device *dev,
@@ -792,7 +792,7 @@ int dump_hab_open(void);
 void dump_hab_close(void);
 int dump_hab_buf(void *buf, int size);
 void hab_pipe_read_dump(struct physical_channel *pchan);
-void dump_hab(int mmid);
+void dump_hab(uint32_t mmid);
 void dump_hab_wq(struct physical_channel *pchan);
 int hab_stat_log(struct physical_channel **pchans, int pchan_cnt, char *dest,
 			int dest_size);

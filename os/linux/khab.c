@@ -10,7 +10,7 @@ int32_t habmm_socket_open(int32_t *handle, uint32_t mm_ip_id,
 		uint32_t timeout, uint32_t flags)
 {
 	return hab_vchan_open(hab_driver.kctx, mm_ip_id, handle,
-				timeout, flags);
+				(int32_t)timeout, flags);
 }
 EXPORT_SYMBOL(habmm_socket_open);
 
@@ -30,7 +30,7 @@ int32_t habmm_socket_send(int32_t handle, void *src_buff,
 	param.sizebytes = size_bytes;
 	param.flags = flags;
 
-	return hab_vchan_send(hab_driver.kctx, handle,
+	return (int32_t)hab_vchan_send(hab_driver.kctx, handle,
 			size_bytes, src_buff, flags);
 }
 EXPORT_SYMBOL(habmm_socket_send);
@@ -43,32 +43,33 @@ int32_t habmm_socket_recv(int32_t handle, void *dst_buff, uint32_t *size_bytes,
 	void **scatter_buf = NULL;
 	int i = 0;
 
-	if (!size_bytes || !dst_buff)
+	if ((size_bytes == NULL) || (dst_buff == NULL))
 		return -EINVAL;
 
 	ret = hab_vchan_recv(hab_driver.kctx, &msg, handle, size_bytes, timeout, flags);
 
-	if (ret == 0 && msg) {
+	if ((ret == 0) && (msg != NULL)) {
 		if (unlikely(msg->scatter)) {
 			scatter_buf = (void **)msg->data;
 
 			/* The maximum size of msg is limited in hab_msg_alloc*/
-			for (i = 0; i < msg->sizebytes / PAGE_SIZE; i++)
+			for (i = 0; (uint32_t)i < msg->sizebytes / PAGE_SIZE; i++)
 				(void)memcpy((char *)((uint64_t)dst_buff
 					+ (uint64_t)(i * PAGE_SIZE)), scatter_buf[i], PAGE_SIZE);
 
-			if (msg->sizebytes % PAGE_SIZE)
+			if ((msg->sizebytes % PAGE_SIZE) != 0U)
 				(void)memcpy((char *)((uint64_t)dst_buff
 					+ (uint64_t)(i * PAGE_SIZE)), scatter_buf[i],
 					msg->sizebytes % PAGE_SIZE);
 		} else
 			(void)memcpy(dst_buff, msg->data, msg->sizebytes);
-	} else
-		if (ret && msg)
+	} else {
+		if ((ret != 0) && (msg != NULL))
 			pr_warn("vcid %X recv failed %d but msg is still received %zd bytes\n",
 				handle, ret, msg->sizebytes);
+	}
 
-	if (msg)
+	if (msg != NULL)
 		hab_msg_free(msg);
 
 	return ret;
@@ -81,7 +82,7 @@ int32_t habmm_export(int32_t handle, void *buff_to_share, uint32_t size_bytes,
 	int ret;
 	struct hab_export param = {0};
 
-	if (!export_id)
+	if (export_id == NULL)
 		return -EINVAL;
 
 	param.vcid = handle;
@@ -113,7 +114,7 @@ int32_t habmm_import(int32_t handle, void **buff_shared, uint32_t size_bytes,
 	int ret;
 	struct hab_import param = {0};
 
-	if (!buff_shared)
+	if (buff_shared == NULL)
 		return -EINVAL;
 
 	param.vcid = handle;
@@ -122,7 +123,7 @@ int32_t habmm_import(int32_t handle, void **buff_shared, uint32_t size_bytes,
 	param.flags = flags;
 
 	ret = hab_mem_import(hab_driver.kctx, &param, 1);
-	if (!ret)
+	if (ret == 0)
 		*buff_shared = (void *)(uintptr_t)param.kva;
 
 	return ret;
@@ -150,15 +151,18 @@ int32_t habmm_socket_query(int32_t handle,
 {
 	int ret;
 	uint64_t ids;
+	uint64_t vmid_local, vmid_remote;
 	char nm[VMNAME_SIZE * 2];
 
-	if (!info)
+	if (info == NULL)
 		return -EINVAL;
 
 	ret = hab_vchan_query(hab_driver.kctx, handle, &ids, nm, sizeof(nm), 1);
-	if (!ret) {
-		info->vmid_local = ids & 0xFFFFFFFFU;
-		info->vmid_remote = (ids & 0xFFFFFFFF00000000UL) > 32;
+	if (ret == 0) {
+		vmid_local = ids & 0xFFFFFFFFU;
+		vmid_remote = (ids & 0xFFFFFFFF00000000UL) >> (uint64_t)32;
+		info->vmid_local = (int32_t)vmid_local;
+		info->vmid_remote = (int32_t)vmid_remote;
 
 		(void)strscpy(info->vmname_local, nm, sizeof(info->vmname_local));
 		(void)strscpy(info->vmname_remote, &nm[sizeof(info->vmname_local)],

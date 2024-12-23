@@ -79,14 +79,14 @@ static int hab_parse_dt(struct local_vmid *settings)
 	/* parse device tree*/
 	pr_debug("parsing hab node in device tree...\n");
 	hab_node = of_find_compatible_node(NULL, NULL, "qcom,hab");
-	if (!hab_node) {
+	if (hab_node == NULL) {
 		pr_err("no hab device tree node\n");
 		return -ENODEV;
 	}
 
 	/* read the local vmid of this VM, like 0 for host, 1 for AGL GVM */
 	result = of_property_read_u32(hab_node, "vmid", &tmp);
-	if (result) {
+	if (result != 0) {
 		pr_err("failed to read local vmid, result = %d\n", result);
 		return result;
 	}
@@ -98,7 +98,7 @@ static int hab_parse_dt(struct local_vmid *settings)
 		/* read the group starting id */
 		result = of_property_read_u32(mmid_grp_node,
 				"grp-start-id", &tmp);
-		if (result) {
+		if (result != 0) {
 			pr_err("failed to read grp-start-id, result = %d\n",
 				result);
 			return result;
@@ -109,24 +109,24 @@ static int hab_parse_dt(struct local_vmid *settings)
 
 		/* read the role(fe/be) of these pchans in this mmid group */
 		result = of_property_read_string(mmid_grp_node, "role", &role);
-		if (result) {
+		if (result != 0) {
 			pr_err("failed to get role, result = %d\n", result);
 			return result;
 		}
 
 		pr_debug("local role of this mmid group is %s\n", role);
-		if (!strcmp(role, "be"))
+		if (strcmp(role, "be") == 0)
 			be = 1;
 		else
 			be = 0;
 
 		/* read the remote vmids for these pchans in this mmid group */
 		vmids_num = of_property_count_elems_of_size(mmid_grp_node,
-					"remote-vmids", sizeof(u32));
+					"remote-vmids", (int)sizeof(u32));
 
 		result = of_property_read_u32_array(mmid_grp_node,
-					"remote-vmids", vmids, vmids_num);
-		if (result) {
+					"remote-vmids", vmids, (size_t)vmids_num);
+		if (result != 0) {
 			pr_err("failed to read remote-vmids, result = %d\n",
 				result);
 			return result;
@@ -144,9 +144,9 @@ static int hab_parse_dt(struct local_vmid *settings)
 
 			result = fill_vmid_mmid_tbl(
 					settings->vmid_mmid_list,
-					vmids[i], 1,
+					(int32_t)vmids[i], 1,
 					grp_start_id/100, 1, be);
-			if (result) {
+			if (result != 0) {
 				pr_err("fill_vmid_mmid_tbl failed\n");
 				return result;
 			}

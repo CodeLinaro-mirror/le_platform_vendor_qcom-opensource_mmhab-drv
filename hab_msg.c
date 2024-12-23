@@ -25,7 +25,7 @@ hab_scatter_msg_alloc(struct physical_channel *pchan, size_t sizebytes)
 	struct hab_message *message = NULL;
 	int i = 0;
 	int allocated = 0;
-	bool failed = false;
+	bool failed = (bool)false;
 	void **scatter_buf = NULL;
 	uint32_t total_num, page_num = 0U;
 
@@ -33,13 +33,13 @@ hab_scatter_msg_alloc(struct physical_channel *pchan, size_t sizebytes)
 	if (sizebytes <= PAGE_SIZE)
 		return NULL;
 
-	page_num = sizebytes >> PAGE_SHIFT;
-	total_num = (sizebytes % PAGE_SIZE == 0) ? page_num : (page_num + 1);
+	page_num = (uint32_t)sizebytes >> PAGE_SHIFT;
+	total_num = (sizebytes % PAGE_SIZE == 0U) ? page_num : (page_num + 1U);
 	message = kzalloc(sizeof(struct hab_message)
 		+ (total_num * sizeof(void *)), GFP_ATOMIC);
-	if (!message)
+	if (message == NULL)
 		return NULL;
-	message->scatter = true;
+	message->scatter = (bool)true;
 	scatter_buf = (void **)message->data;
 
 	/*
@@ -49,28 +49,28 @@ hab_scatter_msg_alloc(struct physical_channel *pchan, size_t sizebytes)
 	 * Part of the message will stuck in the channel if allocation
 	 * failed half way.
 	 */
-	for (i = 0; i < page_num; i++) {
+	for (i = 0; (uint32_t)i < page_num; i++) {
 		scatter_buf[i] = kzalloc(PAGE_SIZE, GFP_ATOMIC);
 		if (scatter_buf[i] == NULL) {
-			failed = true;
+			failed = (bool)true;
 			allocated = i;
 			break;
 		}
 	}
-	if ((!failed) && (sizebytes % PAGE_SIZE != 0)) {
+	if ((!failed) && (sizebytes % PAGE_SIZE != 0U)) {
 		scatter_buf[i] = kzalloc(sizebytes % PAGE_SIZE, GFP_ATOMIC);
 		if (scatter_buf[i] == NULL) {
-			failed = true;
+			failed = (bool)true;
 			allocated = i;
 		}
 	}
 
 	if (!failed) {
-		for (i = 0; i < sizebytes / PAGE_SIZE; i++)
-			message->sizebytes += physical_channel_read(pchan,
+		for (i = 0; (uint32_t)i < sizebytes / PAGE_SIZE; i++)
+			message->sizebytes += (uint32_t)physical_channel_read(pchan,
 				scatter_buf[i], PAGE_SIZE);
-		if (sizebytes % PAGE_SIZE)
-			message->sizebytes += physical_channel_read(pchan,
+		if ((sizebytes % PAGE_SIZE) != 0U)
+			message->sizebytes += (uint32_t)physical_channel_read(pchan,
 				scatter_buf[i], sizebytes % PAGE_SIZE);
 		message->sequence_rx = pchan->sequence_rx;
 	} else {
@@ -95,7 +95,7 @@ hab_msg_alloc(struct physical_channel *pchan, size_t sizebytes)
 	}
 
 	message = kzalloc(sizeof(*message) + sizebytes, GFP_ATOMIC);
-	if (!message)
+	if (message == NULL)
 		/*
 		 * big buffer allocation may fail when memory fragment.
 		 * Instead of one big consecutive kmem, try alloc one page at a time
@@ -103,7 +103,7 @@ hab_msg_alloc(struct physical_channel *pchan, size_t sizebytes)
 		message = hab_scatter_msg_alloc(pchan, sizebytes);
 	else {
 		message->sizebytes =
-			physical_channel_read(pchan, message->data, sizebytes);
+			(uint32_t)physical_channel_read(pchan, message->data, sizebytes);
 
 		message->sequence_rx = pchan->sequence_rx;
 	}
@@ -119,12 +119,12 @@ void hab_msg_free(struct hab_message *message)
 
 	if (unlikely(message->scatter)) {
 		scatter_buf = (void **)message->data;
-		page_num = message->sizebytes >> PAGE_SHIFT;
+		page_num = (uint32_t)message->sizebytes >> PAGE_SHIFT;
 
-		if (message->sizebytes % PAGE_SIZE)
+		if ((message->sizebytes % PAGE_SIZE) != 0U)
 			page_num++;
 
-		for (i = 0; i < page_num; i++)
+		for (i = 0; (uint32_t)i < page_num; i++)
 			kfree(scatter_buf[i]);
 	}
 
@@ -150,18 +150,18 @@ hab_msg_dequeue(struct virtual_channel *vchan, struct hab_message **msg,
 	 * This is what we expected to see.
 	 */
 	int ret = -EAGAIN;
-	int wait = !(flags & HABMM_SOCKET_RECV_FLAGS_NON_BLOCKING);
-	int interruptible = !(flags & HABMM_SOCKET_RECV_FLAGS_UNINTERRUPTIBLE);
-	int timeout_flag = flags & HABMM_SOCKET_RECV_FLAGS_TIMEOUT;
+	int wait = ((flags & HABMM_SOCKET_RECV_FLAGS_NON_BLOCKING) == 0U) ? 1 : 0;
+	int interruptible = ((flags & HABMM_SOCKET_RECV_FLAGS_UNINTERRUPTIBLE) == 0U) ? 1: 0;
+	uint32_t timeout_flag = flags & HABMM_SOCKET_RECV_FLAGS_TIMEOUT;
 	int irqs_disabled = irqs_disabled();
 
-	if (wait) {
+	if (wait == 1) {
 		/* we will wait forever if timeout_flag not set */
-		if (!timeout_flag)
+		if (timeout_flag == 0U)
 			timeout = UINT_MAX;
 
-		if (hab_rx_queue_empty(vchan)) {
-			if (interruptible)
+		if (hab_rx_queue_empty(vchan) != 0) {
+			if (interruptible == 1)
 				ret = wait_event_interruptible_timeout(vchan->rx_queue,
 					!hab_rx_queue_empty(vchan) ||
 					vchan->otherend_closed,
@@ -181,15 +181,15 @@ hab_msg_dequeue(struct virtual_channel *vchan, struct hab_message **msg,
 	 */
 	hab_spin_lock(&vchan->rx_lock, irqs_disabled);
 
-	if (!list_empty(&vchan->rx_list)) {
+	if (list_empty(&vchan->rx_list) == 0) {
 		message = list_first_entry(&vchan->rx_list,
 				struct hab_message, node);
-		if (message) {
-			if (*rsize >= message->sizebytes) {
+		if (message != NULL) {
+			if ((uint32_t)*rsize >= message->sizebytes) {
 				/* msg can be safely retrieved in full */
 				list_del(&message->node);
 				ret = 0;
-				*rsize = message->sizebytes;
+				*rsize = (int32_t)message->sizebytes;
 			} else {
 				pr_err("vcid %x rcv buf too small %d < %zd\n",
 					   vchan->id, *rsize,
@@ -199,7 +199,7 @@ hab_msg_dequeue(struct virtual_channel *vchan, struct hab_message **msg,
 				 * so that the hab client can re-receive the message with the
 				 * correct message size.
 				 */
-				*rsize = message->sizebytes;
+				*rsize = (int32_t)message->sizebytes;
 				message = NULL;
 				ret = -EOVERFLOW; /* come back again */
 			}
@@ -208,7 +208,7 @@ hab_msg_dequeue(struct virtual_channel *vchan, struct hab_message **msg,
 		/* no message received */
 		*rsize = 0;
 
-		if (vchan->otherend_closed)
+		if (vchan->otherend_closed != 0)
 			ret = -ENODEV;
 		else if (ret == -ERESTARTSYS)
 			ret = -EINTR;
@@ -284,7 +284,7 @@ static int hab_send_import_ack(struct virtual_channel *vchan,
 {
 	int ret = 0;
 	struct export_desc_super *exp_super = container_of(export, struct export_desc_super, exp);
-	uint32_t sizebytes = sizeof(*export) + exp_super->payload_size;
+	uint32_t sizebytes = (uint32_t)sizeof(*export) + exp_super->payload_size;
 	struct hab_header header = HAB_HEADER_INITIALIZER;
 
 	HAB_HEADER_SET_SIZE(header, sizebytes);
@@ -318,7 +318,7 @@ static void hab_create_invalid_ack(struct virtual_channel *vchan, uint32_t expor
 	int irqs_disabled = irqs_disabled();
 	struct hab_import_ack_recvd *ack_recvd = kzalloc(sizeof(*ack_recvd), GFP_ATOMIC);
 
-	if (!ack_recvd)
+	if (ack_recvd == NULL)
 		return;
 
 	ack_recvd->ack.export_id = export_id;
@@ -338,10 +338,10 @@ static int hab_receive_import_ack_fail(struct physical_channel *pchan,
 	int irqs_disabled = irqs_disabled();
 	uint32_t exp_id = 0;
 
-	physical_channel_read(pchan, &exp_id, sizeof(uint32_t));
+	(void)physical_channel_read(pchan, &exp_id, sizeof(uint32_t));
 
 	ack_recvd = kzalloc(sizeof(*ack_recvd), GFP_ATOMIC);
-	if (!ack_recvd)
+	if (ack_recvd == NULL)
 		return -ENOMEM;
 
 	ack_recvd->ack.export_id = exp_id;
@@ -382,7 +382,7 @@ static int hab_receive_create_export_ack(struct physical_channel *pchan,
 		kzalloc(sizeof(*ack_recvd), GFP_ATOMIC);
 	int irqs_disabled = irqs_disabled();
 
-	if (!ack_recvd)
+	if (ack_recvd == NULL)
 		return -ENOMEM;
 
 	if (sizeof(ack_recvd->ack) != sizebytes)
@@ -406,7 +406,7 @@ static int hab_receive_create_export_ack(struct physical_channel *pchan,
 	 * But for security reason, we cannot perform it when sizebytes is
 	 * larger than expected.
 	 */
-	if (physical_channel_read(pchan,
+	if ((uint32_t)physical_channel_read(pchan,
 		&ack_recvd->ack,
 		sizebytes) != sizebytes) {
 		kfree(ack_recvd);
@@ -451,12 +451,12 @@ static int hab_receive_export_desc(struct physical_channel *pchan,
 
 	exp_desc_super = kzalloc(sizebytes + sizeof(struct export_desc_super)
 							- sizeof(struct export_desc), GFP_ATOMIC);
-	if (!exp_desc_super)
+	if (exp_desc_super == NULL)
 		return -ENOMEM;
 
 	exp_desc = &exp_desc_super->exp;
 
-	if (physical_channel_read(pchan, exp_desc, sizebytes) != sizebytes) {
+	if ((uint32_t)physical_channel_read(pchan, exp_desc, sizebytes) != sizebytes) {
 		pr_err("%s corrupted exp expect %zd bytes vcid %X remote %X open %d!\n",
 			pchan->name, sizebytes, vchan->id,
 			vchan->otherend_id, vchan->session_id);
@@ -472,7 +472,7 @@ static int hab_receive_export_desc(struct physical_channel *pchan,
 	exp_desc->domid_remote = pchan->vmid_remote;
 	exp_desc->domid_local = pchan->vmid_local;
 	exp_desc->pchan = pchan;
-	if (pchan->mem_proto == 1) {
+	if (pchan->mem_proto == 1U) {
 		exp_desc->vcid_remote = exp_desc->vcid_local;
 		exp_desc->vcid_local = vchan->id;
 	}
@@ -487,9 +487,9 @@ static int hab_receive_export_desc(struct physical_channel *pchan,
 	 */
 	pfn_table = (struct compressed_pfns *)exp_desc->payload;
 	if (pfn_table->nregions <= 0 ||
-	   (pfn_table->nregions > SIZE_MAX / sizeof(struct region)) ||
+	   ((uint32_t)pfn_table->nregions > SIZE_MAX / sizeof(struct region)) ||
 	   (SIZE_MAX - exp_desc_size_expected <
-	   pfn_table->nregions * sizeof(struct region))) {
+	   (uint32_t)pfn_table->nregions * sizeof(struct region))) {
 		pr_err("%s nregions is too large or negative, nregions:%d!\n",
 				pchan->name, pfn_table->nregions);
 		ret = -EINVAL;
@@ -510,7 +510,7 @@ static int hab_receive_export_desc(struct physical_channel *pchan,
 		goto err_imp;
 	}
 
-	exp_desc_size_expected += pfn_table->nregions * sizeof(struct region);
+	exp_desc_size_expected += (uint32_t)pfn_table->nregions * sizeof(struct region);
 	if (sizebytes != exp_desc_size_expected) {
 		pr_err("%s exp size not equal %zu expect %zu\n",
 			pchan->name, sizebytes, exp_desc_size_expected);
@@ -518,9 +518,9 @@ static int hab_receive_export_desc(struct physical_channel *pchan,
 		goto err_imp;
 	}
 
-	if (pchan->mem_proto == 1) {
+	if (pchan->mem_proto == 1U) {
 		ack_recvd = kzalloc(sizeof(*ack_recvd), GFP_ATOMIC);
-		if (!ack_recvd) {
+		if (ack_recvd == NULL) {
 			ret = -ENOMEM;
 			goto err_imp;
 		}
@@ -532,21 +532,21 @@ static int hab_receive_export_desc(struct physical_channel *pchan,
 
 	ret = hab_export_enqueue(vchan, exp_desc);
 
-	if (pchan->mem_proto == 1) {
-		ack_recvd->ack.imp_whse_added = ret ? 0 : 1;
+	if (pchan->mem_proto == 1U) {
+		ack_recvd->ack.imp_whse_added = (ret == 0) ? 1 : 0;
 		hab_spin_lock(&vchan->ctx->impq_lock, irqs_disabled);
 		list_add_tail(&ack_recvd->node, &vchan->ctx->imp_rxq);
 		hab_spin_unlock(&vchan->ctx->impq_lock, irqs_disabled);
 	} else
 		(void)hab_send_export_ack(vchan, pchan, exp_desc);
 
-	if (ret)
+	if (ret != 0)
 		kfree(exp_desc_super);
 
 	return ret;
 
 err_imp:
-	if (pchan->mem_proto == 1) {
+	if (pchan->mem_proto == 1U) {
 		hab_create_invalid_ack(vchan, exp_desc->export_id);
 		hab_send_unimport_msg(vchan, exp_desc->export_id);
 	}
@@ -579,9 +579,9 @@ static void hab_recv_unimport_msg(struct physical_channel *pchan, int vchan_exis
 	struct export_desc_super *exp_super = NULL;
 	int irqs_disabled = irqs_disabled();
 
-	physical_channel_read(pchan, &exp_id, sizeof(uint32_t));
+	(void)physical_channel_read(pchan, &exp_id, sizeof(uint32_t));
 
-	if (!vchan_exist)
+	if (vchan_exist == 0)
 		pr_debug("unimp msg recv after vchan closed on %s, exp id %u\n",
 			pchan->name, exp_id);
 
@@ -595,8 +595,8 @@ static void hab_recv_unimport_msg(struct physical_channel *pchan, int vchan_exis
 
 	if ((export != NULL) && (exp_id == export->export_id) && (export->pchan == pchan)) {
 		exp_super = container_of(export, struct export_desc_super, exp);
-		if (exp_super->remote_imported)
-			exp_super->remote_imported = 0;
+		if (exp_super->remote_imported == 1U)
+			exp_super->remote_imported = 0U;
 		else
 			pr_warn("invalid unimp msg recv on pchan %s, exp id %u\n",
 				pchan->name, exp_id);
@@ -604,9 +604,9 @@ static void hab_recv_unimport_msg(struct physical_channel *pchan, int vchan_exis
 		pr_err("invalid unimp msg recv on %s, exp id %u\n", pchan->name, exp_id);
 	hab_spin_unlock(&pchan->expid_lock, irqs_disabled);
 
-	if (!vchan_exist)
+	if (vchan_exist == 0)
 		/* exp node is not in the reclaim list when vchan still exists */
-		schedule_work(&hab_driver.reclaim_work);
+		(void)schedule_work(&hab_driver.reclaim_work);
 }
 
 int hab_msg_recv(struct physical_channel *pchan,
@@ -623,21 +623,22 @@ int hab_msg_recv(struct physical_channel *pchan,
 	struct export_desc *exp_desc;
 	struct export_desc_super *exp_desc_super = NULL;
 	struct timespec64 ts = {0};
+	int64_t rx_usec_tmp;
 	unsigned long long rx_mpm_tv;
 	int found = 0;
 	struct hab_import_data imp_data = {0};
 	int irqs_disabled = irqs_disabled();
 
 	/* get the local virtual channel if it isn't an open message */
-	if (payload_type != HAB_PAYLOAD_TYPE_INIT &&
-		payload_type != HAB_PAYLOAD_TYPE_INIT_ACK &&
-		payload_type != HAB_PAYLOAD_TYPE_INIT_DONE &&
-		payload_type != HAB_PAYLOAD_TYPE_INIT_CANCEL) {
+	if (payload_type != (uint32_t)HAB_PAYLOAD_TYPE_INIT &&
+		payload_type != (uint32_t)HAB_PAYLOAD_TYPE_INIT_ACK &&
+		payload_type != (uint32_t)HAB_PAYLOAD_TYPE_INIT_DONE &&
+		payload_type != (uint32_t)HAB_PAYLOAD_TYPE_INIT_CANCEL) {
 
 		/* sanity check the received message */
-		if (payload_type >= HAB_PAYLOAD_TYPE_MAX ||
+		if (payload_type >= (uint32_t)HAB_PAYLOAD_TYPE_MAX ||
 			vchan_id > (HAB_HEADER_ID_MASK >> HAB_HEADER_ID_SHIFT)
-			|| !vchan_id ||	!session_id) {
+			|| (vchan_id == 0U) ||	(session_id == 0U)) {
 			pr_err("@@ %s Invalid msg type %d vcid %x bytes %zx sn %d\n",
 				pchan->name, payload_type,
 				vchan_id, sizebytes, session_id);
@@ -649,16 +650,16 @@ int hab_msg_recv(struct physical_channel *pchan,
 		 * this is from pchan instead of ctx
 		 */
 		vchan = hab_vchan_get(pchan, header);
-		if (!vchan) {
+		if (vchan == NULL) {
 			pr_debug("vchan not found type %d vcid %x sz %zx sesn %d\n",
 				payload_type, vchan_id, sizebytes, session_id);
 
-			if (payload_type == HAB_PAYLOAD_TYPE_UNIMPORT) {
+			if (payload_type == (uint32_t)HAB_PAYLOAD_TYPE_UNIMPORT) {
 				hab_recv_unimport_msg(pchan, 0);
 				return 0;
 			}
 
-			if (sizebytes) {
+			if (sizebytes != 0U) {
 				hab_msg_drop(pchan, sizebytes);
 				pr_err("%s msg dropped type %d size %d vcid %X session id %d\n",
 				pchan->name, payload_type,
@@ -666,13 +667,13 @@ int hab_msg_recv(struct physical_channel *pchan,
 				session_id);
 			}
 			return -EINVAL;
-		} else
-			if (vchan->otherend_closed) {
+		} else {
+			if (vchan->otherend_closed == 1) {
 				hab_vchan_put(vchan);
 				pr_info("vc remote closed, msg type %d, vcid %x, sizebytes %zx, session %d\n",
 					payload_type, vchan_id,
 					sizebytes, session_id);
-				if (sizebytes) {
+				if (sizebytes != 0U) {
 					hab_msg_drop(pchan, sizebytes);
 					pr_err("%s message %d dropped remote close, session id %d\n",
 					pchan->name, payload_type,
@@ -680,12 +681,13 @@ int hab_msg_recv(struct physical_channel *pchan,
 				}
 				return -ENODEV;
 			}
+		}
 	} else {
 		if (sizebytes != sizeof(struct hab_open_send_data)) {
 			pr_err("%s Invalid open req type %d vcid %x bytes %zx session %d\n",
 				pchan->name, payload_type, vchan_id,
 				sizebytes, session_id);
-			if (sizebytes) {
+			if (sizebytes != 0U) {
 				hab_msg_drop(pchan, sizebytes);
 				pr_err("%s msg %d dropped unknown reason session id %d\n",
 					pchan->name,
@@ -702,7 +704,7 @@ int hab_msg_recv(struct physical_channel *pchan,
 	case HAB_PAYLOAD_TYPE_SCHE_RESULT_REQ:
 	case HAB_PAYLOAD_TYPE_SCHE_RESULT_RSP:
 		message = hab_msg_alloc(pchan, sizebytes);
-		if (!message)
+		if (message == NULL)
 			break;
 
 		hab_msg_queue(vchan, message);
@@ -711,8 +713,8 @@ int hab_msg_recv(struct physical_channel *pchan,
 	case HAB_PAYLOAD_TYPE_INIT:
 	case HAB_PAYLOAD_TYPE_INIT_ACK:
 	case HAB_PAYLOAD_TYPE_INIT_DONE:
-		ret = hab_open_request_add(pchan, sizebytes, payload_type);
-		if (ret) {
+		ret = hab_open_request_add(pchan, sizebytes, (enum hab_payload_type)payload_type);
+		if (ret != 0) {
 			pr_err("%s open request add failed, ret %d, payload type %d, sizebytes %zx\n",
 				pchan->name, ret, payload_type, sizebytes);
 			break;
@@ -725,14 +727,14 @@ int hab_msg_recv(struct physical_channel *pchan,
 			vchan_id, session_id, pchan->vmid_local,
 			pchan->vmid_remote);
 		ret = hab_open_receive_cancel(pchan, sizebytes);
-		if (ret)
+		if (ret != 0)
 			pr_err("%s open cancel handling failed ret %d vcid %X session %d\n",
 				pchan->name, ret, vchan_id, session_id);
 		break;
 
 	case HAB_PAYLOAD_TYPE_EXPORT:
 		ret = hab_receive_export_desc(pchan, vchan, sizebytes);
-		if (ret)
+		if (ret != 0)
 			pr_err("failed to handle exp msg on vcid %x, ret %d\n",
 				vchan->id, ret);
 		break;
@@ -740,7 +742,7 @@ int hab_msg_recv(struct physical_channel *pchan,
 	case HAB_PAYLOAD_TYPE_EXPORT_ACK:
 		ret = hab_receive_create_export_ack(pchan, vchan->ctx,
 				sizebytes);
-		if (ret) {
+		if (ret != 0) {
 			pr_err("%s failed to handled export ack %d\n",
 				pchan->name, ret);
 			break;
@@ -767,14 +769,15 @@ int hab_msg_recv(struct physical_channel *pchan,
 
 		/* pull down the incoming data */
 		message = hab_msg_alloc(pchan, sizebytes);
-		if (!message)
+		if (message == NULL)
 			pr_err("%s failed to allocate msg Arrived msg will be lost\n",
 					pchan->name);
 		else {
 			struct habmm_xing_vm_stat *pstat =
 				(struct habmm_xing_vm_stat *)message->data;
-			pstat->rx_sec = ts.tv_sec;
-			pstat->rx_usec = ts.tv_nsec/NSEC_PER_USEC;
+			pstat->rx_sec = (uint64_t)ts.tv_sec;
+			rx_usec_tmp = ts.tv_nsec/NSEC_PER_USEC;
+			pstat->rx_usec = (uint64_t)rx_usec_tmp;
 			hab_msg_queue(vchan, message);
 		}
 		break;
@@ -790,7 +793,7 @@ int hab_msg_recv(struct physical_channel *pchan,
 		rx_mpm_tv = msm_timer_get_sclk_ticks();
 		/* pull down the incoming data */
 		message = hab_msg_alloc(pchan, sizebytes);
-		if (!message)
+		if (message == NULL)
 			pr_err("%s failed to allocate msg Arrived msg will be lost\n",
 					pchan->name);
 		else {
@@ -800,7 +803,7 @@ int hab_msg_recv(struct physical_channel *pchan,
 		break;
 
 	case HAB_PAYLOAD_TYPE_IMPORT:
-		if (physical_channel_read(pchan, &imp_data, sizeof(struct hab_import_data)) !=
+		if ((uint32_t)physical_channel_read(pchan, &imp_data, sizeof(struct hab_import_data)) !=
 			sizeof(struct hab_import_data)) {
 			pr_err("corrupted import request, id %u page %u vcid %X on %s\n",
 					imp_data.exp_id, imp_data.page_cnt, vchan->id, pchan->name);
@@ -810,30 +813,30 @@ int hab_msg_recv(struct physical_channel *pchan,
 		/* expid lock is hold to ensure the availability of exp node */
 		hab_spin_lock(&pchan->expid_lock, irqs_disabled);
 		exp_desc = idr_find(&pchan->expid_idr, imp_data.exp_id);
-		if ((exp_desc != NULL) && (imp_data.page_cnt == exp_desc->payload_count)) {
+		if ((exp_desc != NULL) && (imp_data.page_cnt == (uint32_t)exp_desc->payload_count)) {
 			found = 1;
 			exp_desc_super = container_of(exp_desc, struct export_desc_super, exp);
 		} else
 			found = 0;
 
 		if (found == 1 && (exp_desc_super->exp_state == HAB_EXP_SUCCESS)) {
-			exp_desc_super->remote_imported = 1;
+			exp_desc_super->remote_imported = 1U;
 			/* might sleep in Vhost & VirtIO HAB, need non-blocking send or RT Linux */
-			hab_send_import_ack(vchan, exp_desc);
+			(void)hab_send_import_ack(vchan, exp_desc);
 			pr_debug("remote imported exp id %d on vcid %x\n",
 				exp_desc->export_id, vchan->id);
 		} else {
 			pr_err("requested exp id %u not found %d on %s\n",
 				imp_data.exp_id, found, pchan->name);
 			/* might sleep in Vhost & VirtIO HAB, need non-blocking send or RT Linux */
-			hab_send_import_ack_fail(vchan, imp_data.exp_id);
+			(void)hab_send_import_ack_fail(vchan, imp_data.exp_id);
 		}
 		hab_spin_unlock(&pchan->expid_lock, irqs_disabled);
 		break;
 
 	case HAB_PAYLOAD_TYPE_IMPORT_ACK:
 		ret = hab_receive_export_desc(pchan, vchan, sizebytes);
-		if (ret)
+		if (ret != 0)
 			pr_err("%s failed to handle import ack %d\n", pchan->name, ret);
 
 		/* always try to wake up importer when any failure happens */
@@ -842,7 +845,7 @@ int hab_msg_recv(struct physical_channel *pchan,
 
 	case HAB_PAYLOAD_TYPE_IMPORT_ACK_FAIL:
 		ret = hab_receive_import_ack_fail(pchan, vchan);
-		if (ret)
+		if (ret != 0)
 			pr_err("%s failed to handle import ack fail msg %d\n", pchan->name, ret);
 
 		/* always try to wake up importer when any failure happens */
@@ -859,7 +862,7 @@ int hab_msg_recv(struct physical_channel *pchan,
 			sizebytes, session_id);
 		break;
 	}
-	if (vchan)
-		hab_vchan_put(vchan);
+	hab_vchan_put(vchan);
+
 	return ret;
 }

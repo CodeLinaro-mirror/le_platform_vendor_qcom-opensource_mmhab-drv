@@ -10,20 +10,21 @@ hab_vchan_alloc(struct uhab_context *ctx, struct physical_channel *pchan,
 				int openid)
 {
 	int id;
+	uint32_t id2;
 	struct virtual_channel *vchan;
 
-	if (!pchan || !ctx)
+	if (pchan == NULL || ctx == NULL)
 		return NULL;
 
 	vchan = kzalloc(sizeof(*vchan), GFP_KERNEL);
-	if (!vchan)
+	if (vchan == NULL)
 		return NULL;
 
 	/* This should be the first thing we do in this function */
 	idr_preload(GFP_KERNEL);
 	spin_lock_bh(&pchan->vid_lock);
 	id = idr_alloc(&pchan->vchan_idr, vchan, 1,
-		(HAB_VCID_ID_MASK >> HAB_VCID_ID_SHIFT) + 1, GFP_NOWAIT);
+		(int)((HAB_VCID_ID_MASK >> HAB_VCID_ID_SHIFT) + 1U), GFP_NOWAIT);
 	spin_unlock_bh(&pchan->vid_lock);
 	idr_preload_end();
 
@@ -37,16 +38,17 @@ hab_vchan_alloc(struct uhab_context *ctx, struct physical_channel *pchan,
 	hab_pchan_get(pchan);
 	vchan->pchan = pchan;
 	/* vchan need both vcid and openid to be properly located */
-	vchan->session_id = openid;
+	vchan->session_id = (uint32_t)openid;
 	write_lock(&pchan->vchans_lock);
 	list_add_tail(&vchan->pnode, &pchan->vchannels);
 	pchan->vcnt++;
 	write_unlock(&pchan->vchans_lock);
-	vchan->id = ((id << HAB_VCID_ID_SHIFT) & HAB_VCID_ID_MASK) |
-		((pchan->habdev->id << HAB_VCID_MMID_SHIFT) &
+	id2 = (uint32_t)(((uint32_t)id << HAB_VCID_ID_SHIFT) & HAB_VCID_ID_MASK) |
+		(uint32_t)((pchan->habdev->id << HAB_VCID_MMID_SHIFT) &
 			HAB_VCID_MMID_MASK) |
-		((pchan->dom_id << HAB_VCID_DOMID_SHIFT) &
+		(((uint32_t)pchan->dom_id << HAB_VCID_DOMID_SHIFT) &
 			HAB_VCID_DOMID_MASK);
+	vchan->id = (int)id2;
 	spin_lock_init(&vchan->rx_lock);
 	INIT_LIST_HEAD(&vchan->rx_list);
 	init_waitqueue_head(&vchan->rx_queue);
@@ -119,14 +121,14 @@ hab_vchan_get(struct physical_channel *pchan, struct hab_header *header)
 
 	hab_spin_lock(&pchan->vid_lock, irqs_disabled);
 	vchan = idr_find(&pchan->vchan_idr, HAB_VCID_GET_ID(vchan_id));
-	if (vchan) {
+	if (vchan != NULL) {
 		if (vchan->session_id != session_id)
 			/*
 			 * skipped if session is different even vcid
 			 * is the same
 			 */
 			vchan = NULL;
-		else if (!vchan->otherend_id /*&& !vchan->session_id*/) {
+		else if (vchan->otherend_id == 0 /*&& !vchan->session_id*/) {
 			/*
 			 * not paired vchan can be fetched right after it is
 			 * alloc'ed. so it has to be skipped during search
@@ -137,15 +139,15 @@ hab_vchan_get(struct physical_channel *pchan, struct hab_header *header)
 				get_refcnt(vchan->refcount),
 				payload_type, sizebytes);
 			vchan = NULL;
-		} else if (vchan->otherend_closed || vchan->closed) {
+		} else if (vchan->otherend_closed != 0 || vchan->closed != 0) {
 			pr_debug("closed already remote %d local %d vcid %x remote %x session %d refcnt %d header %x session %d type %d sz %zd\n",
 				vchan->otherend_closed, vchan->closed,
 				vchan->id, vchan->otherend_id,
 				vchan->session_id, get_refcnt(vchan->refcount),
 				vchan_id, session_id, payload_type, sizebytes);
 			vchan = NULL;
-		} else
-			if (!kref_get_unless_zero(&vchan->refcount)) {
+		} else {
+			if (kref_get_unless_zero(&vchan->refcount) == 0) {
 				/*
 				 * this happens when refcnt is already zero
 				 * (put from other thread) or there is an actual error
@@ -156,6 +158,7 @@ hab_vchan_get(struct physical_channel *pchan, struct hab_header *header)
 					vchan_id, session_id, payload_type, sizebytes);
 				vchan = NULL;
 			}
+		}
 	}
 	hab_spin_unlock(&pchan->vid_lock, irqs_disabled);
 
@@ -165,11 +168,11 @@ hab_vchan_get(struct physical_channel *pchan, struct hab_header *header)
 /* wake up local waiting Q, so stop-vchan can be processed */
 void hab_vchan_stop(struct virtual_channel *vchan)
 {
-	if (vchan) {
+	if (vchan != NULL) {
 		vchan->otherend_closed = 1;
 		wake_up(&vchan->rx_queue);
-		if (vchan->ctx)
-			if (vchan->pchan->mem_proto == 1)
+		if (vchan->ctx != NULL)
+			if (vchan->pchan->mem_proto == 1U)
 				wake_up_interruptible(&vchan->ctx->imp_wq);
 			else
 				wake_up_interruptible(&vchan->ctx->exp_wq);
@@ -204,13 +207,13 @@ static int hab_vchans_per_pchan_empty(struct physical_channel *pchan)
 
 	read_lock(&pchan->vchans_lock);
 	empty = list_empty(&pchan->vchannels);
-	if (!empty) {
+	if (empty == 0) {
 		struct virtual_channel *vchan;
 		int vcnt = pchan->vcnt;
 
 		list_for_each_entry(vchan, &pchan->vchannels, pnode) {
 			/* discount open-pending unpaired vchan */
-			if (!vchan->session_id)
+			if (vchan->session_id == 0U)
 				vcnt--;
 			else {
 				ktime_get_ts64(&tsnow);
@@ -225,7 +228,7 @@ static int hab_vchans_per_pchan_empty(struct physical_channel *pchan)
 				}
 			}
 		}
-		if (!vcnt)
+		if (vcnt == 0)
 			empty = 1;/* unpaired vchan can exist at init time */
 	}
 	read_unlock(&pchan->vchans_lock);
@@ -245,7 +248,7 @@ static int hab_vchans_empty(int vmid)
 		read_lock_bh(&hab_dev->pchan_lock);
 		list_for_each_entry(pchan, &hab_dev->pchannels, node) {
 			if (pchan->vmid_remote == vmid) {
-				if (!hab_vchans_per_pchan_empty(pchan)) {
+				if (hab_vchans_per_pchan_empty(pchan) == 0) {
 					empty = 0;
 					pr_info("vmid %d %s's vchans are not closed\n",
 							vmid, pchan->name);
@@ -267,7 +270,7 @@ void hab_vchans_empty_wait(int vmid)
 {
 	pr_debug("waiting for GVM%d's sockets closure\n", vmid);
 
-	while (!hab_vchans_empty(vmid))
+	while (hab_vchans_empty(vmid) == 0)
 		usleep_range(10000, 12000);
 
 	pr_debug("all of GVM%d's sockets are closed\n", vmid);
@@ -281,7 +284,7 @@ void hab_vchans_empty_wait_pchan(struct physical_channel *pchan)
 {
         pr_debug("waiting for vchan's sockets closure for %s\n", pchan->name);
 
-        while (!hab_vchans_per_pchan_empty(pchan))
+        while (hab_vchans_per_pchan_empty(pchan) == 0)
                 msleep(999);
 
         pr_debug("all of vchan's sockets are closed for %s\n", pchan->name);
@@ -289,12 +292,12 @@ void hab_vchans_empty_wait_pchan(struct physical_channel *pchan)
 
 int hab_vchan_find_domid(struct virtual_channel *vchan)
 {
-	return vchan ? vchan->pchan->dom_id : -1;
+	return (vchan != NULL) ? vchan->pchan->dom_id : -1;
 }
 
 void hab_vchan_put(struct virtual_channel *vchan)
 {
-	if (vchan)
+	if (vchan != NULL)
 		(void)kref_put(&vchan->refcount, hab_vchan_free);
 }
 
@@ -304,18 +307,18 @@ int hab_vchan_query(struct uhab_context *ctx, int32_t vcid, uint64_t *ids,
 	struct virtual_channel *vchan;
 
 	vchan = hab_get_vchan_fromvcid(vcid, ctx, 1);
-	if (!vchan)
+	if (vchan == NULL)
 		return -EINVAL;
 
-	if (vchan->otherend_closed) {
+	if (vchan->otherend_closed == 1) {
 		hab_vchan_put(vchan);
 		return -ENODEV;
 	}
 
-	*ids = vchan->pchan->vmid_local |
+	*ids = (uint64_t)vchan->pchan->vmid_local |
 		((uint64_t)vchan->pchan->vmid_remote) << 32;
-	names[0] = 0;
-	names[name_size/2] = 0;
+	names[0] = (char)0;
+	names[name_size/2U] = (char)0;
 
 	hab_vchan_put(vchan);
 

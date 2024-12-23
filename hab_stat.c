@@ -33,7 +33,7 @@ int hab_stat_buffer_print(char *dest,
 	ret = vsnprintf(line, sizeof(line), fmt, args);
 	va_end(args);
 	if (ret > 0)
-		ret = strlcat(dest, line, dest_size);
+		ret = (int)strlcat(dest, line, (uint32_t)dest_size);
 	return ret;
 }
 
@@ -42,7 +42,7 @@ int hab_stat_show_vchan(struct hab_driver *driver,
 {
 	int i, ret = 0;
 
-	ret = strscpy(buf, "", size);
+	(void)strscpy(buf, "", (uint32_t)size);
 	for (i = 0; i < driver->ndevices; i++) {
 		struct hab_device *dev = &driver->devp[i];
 		struct physical_channel *pchan;
@@ -50,7 +50,7 @@ int hab_stat_show_vchan(struct hab_driver *driver,
 
 		read_lock_bh(&dev->pchan_lock);
 		list_for_each_entry(pchan, &dev->pchannels, node) {
-			if (!pchan->vcnt)
+			if (pchan->vcnt == 0)
 				continue;
 
 			ret = hab_stat_buffer_print(buf, size,
@@ -84,7 +84,7 @@ int hab_stat_show_ctx(struct hab_driver *driver,
 	int ret = 0;
 	struct uhab_context *ctx;
 
-	(void)strscpy(buf, "", size);
+	(void)strscpy(buf, "", (uint32_t)size);
 
 	spin_lock_bh(&hab_driver.drvlock);
 	ret = hab_stat_buffer_print(buf, size,
@@ -103,13 +103,13 @@ int hab_stat_show_ctx(struct hab_driver *driver,
 	return ret;
 }
 
-static int get_pft_tbl_total_size(struct compressed_pfns *pfn_table)
+static uint32_t get_pft_tbl_total_size(struct compressed_pfns *pfn_table)
 {
-	int i, total_size = 0;
+	int i;
+	uint32_t total_size = 0U;
 
 	for (i = 0; i < pfn_table->nregions; i++)
-		total_size += pfn_table->region[i].size * PAGE_SIZE;
-
+		total_size += pfn_table->region[i].size * (uint32_t)PAGE_SIZE;
 	return total_size;
 }
 
@@ -117,11 +117,10 @@ static int print_ctx_total_expimp(struct uhab_context *ctx,
 		char *buf, int size)
 {
 	struct compressed_pfns *pfn_table = NULL;
-	int exp_total = 0, imp_total = 0;
 	int exp_cnt = 0, imp_cnt = 0;
 	struct export_desc *export = NULL;
 	struct export_desc_super *exp_super, *exp_super_tmp;
-	int exim_size = 0;
+	uint32_t imp_total = 0, exim_size = 0U, exp_total = 0U;
 	int ret = 0;
 
 	read_lock(&ctx->exp_lock);
@@ -136,7 +135,7 @@ static int print_ctx_total_expimp(struct uhab_context *ctx,
 	spin_lock_bh(&ctx->imp_lock);
 	hab_rb_for_each_entry(exp_super, exp_super_tmp, &ctx->imp_whse, node) {
 		export = &exp_super->exp;
-		if (habmm_imp_hyp_map_check(ctx->import_ctx, export)) {
+		if (habmm_imp_hyp_map_check(ctx->import_ctx, export) != 0) {
 			pfn_table =	(struct compressed_pfns *)export->payload;
 			exim_size = get_pft_tbl_total_size(pfn_table);
 			imp_total += exim_size;
@@ -145,9 +144,9 @@ static int print_ctx_total_expimp(struct uhab_context *ctx,
 	}
 	spin_unlock_bh(&ctx->imp_lock);
 
-	if (exp_cnt || exp_total || imp_cnt || imp_total)
+	if (exp_cnt != 0 || exp_total != 0U || imp_cnt != 0 || imp_total != 0U)
 		ret = hab_stat_buffer_print(buf, size,
-				"ctx %d exp %d size %d imp %d size %d\n",
+				"ctx %d exp %d size %d imp %d size %u\n",
 				ctx->owner, exp_cnt, exp_total,
 				imp_cnt, imp_total);
 	else
@@ -169,7 +168,7 @@ static int print_ctx_total_expimp(struct uhab_context *ctx,
 	ret = hab_stat_buffer_print(buf, size, "import[expid:vcid:size]: ");
 	hab_rb_for_each_entry(exp_super, exp_super_tmp, &ctx->imp_whse, node) {
 		export = &exp_super->exp;
-		if (habmm_imp_hyp_map_check(ctx->import_ctx, export)) {
+		if (habmm_imp_hyp_map_check(ctx->import_ctx, export) != 0) {
 			pfn_table =	(struct compressed_pfns *)export->payload;
 			exim_size = get_pft_tbl_total_size(pfn_table);
 			ret = hab_stat_buffer_print(buf, size,
@@ -189,13 +188,13 @@ int hab_stat_show_expimp(struct hab_driver *driver,
 	struct uhab_context *ctx = NULL;
 	int ret = 0;
 	struct virtual_channel *vchan = NULL;
-	int mmid = 0;
+	uint32_t mmid = 0;
 	struct physical_channel *pchans[HABCFG_MMID_NUM];
 	int pchan_count = 0;
 
 	(void)driver;
 
-	ret = strscpy(buf, "", size);
+	(void)strscpy(buf, "", (uint32_t)size);
 
 	spin_lock_bh(&hab_driver.drvlock);
 	list_for_each_entry(ctx, &hab_driver.uctx_list, node) {
@@ -226,10 +225,10 @@ int hab_stat_show_reclaim(struct hab_driver *driver, char *buf, int size)
 {
 	struct export_desc *export = NULL;
 	struct compressed_pfns *pfn_table = NULL;
-	int exim_size = 0;
-	size_t total_size = 0, total_num = 0;
+	uint32_t exim_size = 0U, total_size = 0U;
+	size_t total_num = 0U;
 
-	(void)strscpy(buf, "", size);
+	(void)strscpy(buf, "", (uint32_t)size);
 	(void)hab_stat_buffer_print(buf, size, "export[expid:vcid:size:pchan]:\n");
 
 	spin_lock(&hab_driver.reclaim_lock);
@@ -263,14 +262,14 @@ int dump_hab_open(void)
 	char file_path[256];
 	char file_time[100];
 
-	rc = dump_hab_get_file_name(file_time, sizeof(file_time));
+	rc = dump_hab_get_file_name(file_time, (int)sizeof(file_time));
 	(void)strscpy(file_path, HAB_PIPE_DUMP_FILE_NAME, sizeof(file_path));
 	(void)strlcat(file_path, file_time, sizeof(file_path));
 	(void)strlcat(file_path, HAB_PIPE_DUMP_FILE_EXT, sizeof(file_path));
 
-	filp = vmalloc(HAB_PIPEDUMP_SIZE);
+	filp = vmalloc((uint32_t)HAB_PIPEDUMP_SIZE);
 	if (IS_ERR(filp)) {
-		rc = PTR_ERR(filp);
+		rc = (int)PTR_ERR(filp);
 		pr_err("failed to create pipe dump buffer rc %d\n", rc);
 		filp = NULL;
 	} else {
@@ -291,7 +290,7 @@ void dump_hab_close(void)
 
 int dump_hab_buf(void *buf, int size)
 {
-	if (!buf || !size || size > HAB_PIPEDUMP_SIZE - pipedump_idx) {
+	if (buf == NULL || size == 0 || size > HAB_PIPEDUMP_SIZE - pipedump_idx) {
 		pr_err("wrong parameters buf %pK size %d allowed %d\n",
 			 buf, size, HAB_PIPEDUMP_SIZE - pipedump_idx);
 		return 0;
@@ -302,11 +301,11 @@ int dump_hab_buf(void *buf, int size)
 	return size;
 }
 
-void dump_hab(int mmid)
+void dump_hab(uint32_t mmid)
 {
 	struct physical_channel *pchan = NULL;
 	int i = 0;
-	char str[8] = {35, 35, 35, 35, 35, 35, 35, 35}; /* ## */
+	char str[8] = {'#', '#', '#', '#', '#', '#', '#', '#'};
 
 	(void)dump_hab_open();
 	for (i = 0; i < hab_driver.ndevices; i++) {
@@ -324,6 +323,6 @@ void dump_hab(int mmid)
 			(void)dump_hab_buf(str, 8); /* separator */
 		}
 	}
-	dev_coredumpv(hab_driver.dev, filp, pipedump_idx, GFP_KERNEL);
+	dev_coredumpv(hab_driver.dev, filp, (uint32_t)pipedump_idx, GFP_KERNEL);
 	dump_hab_close();
 }

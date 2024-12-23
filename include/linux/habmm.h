@@ -9,8 +9,8 @@
 #include "linux/habmmid.h"
 
 #define HAB_API_VER_DEF(_MAJOR_, _MINOR_) \
-		((_MAJOR_&0xFF)<<16 | (_MINOR_&0xFFF))
-#define HAB_API_VER	HAB_API_VER_DEF(1, 0)
+		((_MAJOR_ & 0xFFU) << 16 | (_MINOR_ & 0xFFFU))
+#define HAB_API_VER	HAB_API_VER_DEF(1U, 0U)
 
 #include <linux/types.h>
 
@@ -88,14 +88,14 @@ int32_t habmm_socket_close(int32_t handle);
 /* Non-blocking mode: function will return immediately with HAB_AGAIN
  * if the send operation cannot be completed without blocking.
  */
-#define HABMM_SOCKET_SEND_FLAGS_NON_BLOCKING 0x00000001
+#define HABMM_SOCKET_SEND_FLAGS_NON_BLOCKING 0x00000001U
 
 /* Collect cross-VM stats: client provides stat-buffer large enough to allow 2
  * sets of a 2-uint64_t pair to collect seconds and nano-seconds at the
  * beginning of the stat-buffer. Stats are collected when the stat-buffer leaves
  *  VM1, then enters VM2
  */
-#define HABMM_SOCKET_SEND_FLAGS_XING_VM_STAT 0x00000002
+#define HABMM_SOCKET_SEND_FLAGS_XING_VM_STAT 0x00000002U
 
 /* start to measure cross-vm schedule latency: VM1 send msg with this flag
  * to VM2 to kick off the measurement. In the hab driver level, the VM1 hab
@@ -103,7 +103,7 @@ int32_t habmm_socket_close(int32_t handle);
  * it for later usage. The VM2 hab driver shall record the time of schedule
  * in with mpm_timer and pass it to "habtest" application.
  */
-#define HABMM_SOCKET_XVM_SCHE_TEST 0x00000004
+#define HABMM_SOCKET_XVM_SCHE_TEST 0x00000004U
 
 /* VM2 responds this message to VM1 for HABMM_SOCKET_XVM_SCHE_TEST.
  * In the hab driver level, the VM2 hab driver shall record the time of schedule
@@ -111,14 +111,14 @@ int32_t habmm_socket_close(int32_t handle);
  * shall record the time of schedule in with mpm_timer and pass it to "habtest"
  * application.
  */
-#define HABMM_SOCKET_XVM_SCHE_TEST_ACK 0x00000008
+#define HABMM_SOCKET_XVM_SCHE_TEST_ACK 0x00000008U
 
 /* VM1 sends this message to VM2 asking for collect all the mpm_timer values
  * to calculate the latency of schduling between VM1 and VM2. In the hab driver
  * level, the VM1 hab driver shall save the previous restored schduling out
  * time to the message buffer
  */
-#define HABMM_SOCKET_XVM_SCHE_RESULT_REQ 0x00000010
+#define HABMM_SOCKET_XVM_SCHE_RESULT_REQ 0x00000010U
 
 /* VM2 responds this message to VM2 for HABMM_SOCKET_XVM_SCHE_RESULT_REQ.
  * In the habtest application level, VM2 shall save the previous restored
@@ -126,7 +126,7 @@ int32_t habmm_socket_close(int32_t handle);
  * shall save the previous restored scheduling out time to the message
  * buffer.
  */
-#define HABMM_SOCKET_XVM_SCHE_RESULT_RSP 0x00000020
+#define HABMM_SOCKET_XVM_SCHE_RESULT_RSP 0x00000020U
 
 struct habmm_xing_vm_stat {
 	uint64_t tx_sec;
@@ -166,12 +166,12 @@ int32_t habmm_socket_send(int32_t handle, void *src_buff, uint32_t size_bytes,
 /* Non-blocking mode: function will return immediately if there is no data
  * available.
  */
-#define HABMM_SOCKET_RECV_FLAGS_NON_BLOCKING 0x00000001
+#define HABMM_SOCKET_RECV_FLAGS_NON_BLOCKING 0x00000001U
 
 /* In the blocking mode, this flag is used to indicate it is an
  * uninterruptbile blocking call.
  */
-#define HABMM_SOCKET_RECV_FLAGS_UNINTERRUPTIBLE 0x00000002
+#define HABMM_SOCKET_RECV_FLAGS_UNINTERRUPTIBLE 0x00000002U
 
 /* Enable timeout function, This flag is used to indicate that the timeout
  * function takes effect. Note that the timeout parameter is meaningful only if
@@ -179,7 +179,7 @@ int32_t habmm_socket_send(int32_t handle, void *src_buff, uint32_t size_bytes,
  * In addition, when the HABMM_SOCKET_RECV_FLAGS_NON_BLOCKING flag is set,
  * the current flag is ignored.
  */
-#define HABMM_SOCKET_RECV_FLAGS_TIMEOUT 0x00000004
+#define HABMM_SOCKET_RECV_FLAGS_TIMEOUT 0x00000004U
 
 int32_t habmm_socket_recv(int32_t handle, void *dst_buff, uint32_t *size_bytes,
 		uint32_t timeout, uint32_t flags);
@@ -245,13 +245,13 @@ int32_t habmm_socket_recvfrom(int32_t handle, void *dst_buff,
  * does exist, HAB needs to use DMA method to retrieve the memory for exporting.
  * If it does not exist, this flag is ignored.
  */
-#define HABMM_EXP_MEM_TYPE_DMA 0x00000001
+#define HABMM_EXP_MEM_TYPE_DMA 0x00000001U
 
 /*
  * this flag is used for export from dma_buf fd or import to dma_buf fd
  */
-#define HABMM_EXPIMP_FLAGS_FD     0x00010000
-#define HABMM_EXPIMP_FLAGS_DMABUF 0x00020000
+#define HABMM_EXPIMP_FLAGS_FD     0x00010000U
+#define HABMM_EXPIMP_FLAGS_DMABUF 0x00020000U
 
 #define HAB_MAX_EXPORT_SIZE 0x8000000
 
@@ -318,7 +318,7 @@ int32_t habmm_unexport(int32_t handle, uint32_t export_id, uint32_t flags);
 /* Non-blocking mode: function will return immediately if there is no data
  * available.  Supported only for kernel clients.
  */
-#define HABMM_IMPORT_FLAGS_CACHED 0x00000001
+#define HABMM_IMPORT_FLAGS_CACHED 0x00000001U
 
 int32_t habmm_import(int32_t handle, void **buff_shared, uint32_t size_bytes,
 		uint32_t export_id, uint32_t flags);
