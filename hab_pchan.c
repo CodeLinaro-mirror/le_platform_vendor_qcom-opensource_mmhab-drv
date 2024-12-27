@@ -71,22 +71,25 @@ static void hab_pchan_free(struct kref *ref)
 struct physical_channel *
 hab_pchan_find_domid(struct hab_device *dev, int dom_id)
 {
-	struct physical_channel *pchan;
+	struct physical_channel *pchan = NULL, *tmp;
+	int ret;
 
 	read_lock_bh(&dev->pchan_lock);
-	list_for_each_entry(pchan, &dev->pchannels, node)
-		if (pchan->dom_id == dom_id || dom_id == HABCFG_VMID_DONT_CARE)
+	list_for_each_entry(tmp, &dev->pchannels, node)
+		if (tmp->dom_id == dom_id || dom_id == HABCFG_VMID_DONT_CARE) {
+			pchan = tmp;
 			break;
+		}
 
-	if (pchan->dom_id != dom_id && dom_id != HABCFG_VMID_DONT_CARE) {
-		pr_err("dom_id mismatch requested %d, existing %d\n",
-			dom_id, pchan->dom_id);
-		pchan = NULL;
-	}
-
-	if ((pchan != NULL) && (kref_get_unless_zero(&pchan->refcount) == 0))
-		pchan = NULL;
-
+	if (pchan != NULL) {
+		/* pchan found */
+		ret = kref_get_unless_zero(&pchan->refcount);
+		if (ret == 0) {
+			pr_err("pchan get failed(refcnt already 0) for dev %u\n", dev->id);
+			pchan = NULL;
+		}
+	} else
+		pr_err("pchan not found %u, %d\n", dev->id, dom_id);
 	read_unlock_bh(&dev->pchan_lock);
 
 	return pchan;
