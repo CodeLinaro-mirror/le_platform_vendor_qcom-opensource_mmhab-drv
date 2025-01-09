@@ -162,7 +162,7 @@ hab_msg_dequeue(struct virtual_channel *vchan, struct hab_message **msg,
 
 		if (hab_rx_queue_empty(vchan)) {
 			if (interruptible)
-				ret = wait_event_interruptible_timeout(vchan->rx_queue,
+				ret = wait_event_freezable_timeout(vchan->rx_queue,
 					!hab_rx_queue_empty(vchan) ||
 					vchan->otherend_closed,
 					msecs_to_jiffies(timeout));

@@ -46,7 +46,7 @@ static int hab_import_ack_wait(struct uhab_context *ctx,
 {
 	int ret;
 
-	ret = wait_event_interruptible_timeout(ctx->imp_wq,
+	ret = wait_event_freezable_timeout(ctx->imp_wq,
 		hab_import_ack_find(ctx, import_ack, vchan, scan_imp_whse),
 		HAB_HS_TIMEOUT);
 

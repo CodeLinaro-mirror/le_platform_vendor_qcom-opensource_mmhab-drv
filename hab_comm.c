@@ -48,7 +48,7 @@ int lb_kthread(void *d)
 
 	while (!p->stop) {
 		schedule();
-		ret = wait_event_interruptible(dev->thread_queue,
+		ret = wait_event_freezable(dev->thread_queue,
 				   !lb_thread_queue_empty(dev) ||
 				   p->stop);
 
