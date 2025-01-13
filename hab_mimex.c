@@ -552,7 +552,6 @@ int hab_mem_import(struct uhab_context *ctx,
 	}
 
 	export->import_index = param->index;
-	export->kva = (kernel != 0) ? (void *)param->kva : NULL;
 	exp_super->import_state = EXP_DESC_IMPORTED;
 
 err_imp:
@@ -585,6 +584,7 @@ int hab_mem_unimport(struct uhab_context *ctx,
 	struct export_desc *export = NULL;
 	struct export_desc_super *exp_super = NULL, key = {0};
 	struct virtual_channel *vchan;
+	long fcnt_idle;
 
 	if ((ctx == NULL) || (param == NULL))
 		return -EINVAL;
@@ -594,6 +594,11 @@ int hab_mem_unimport(struct uhab_context *ctx,
 		hab_vchan_put(vchan);
 		return -ENODEV;
 	}
+
+	if ((kernel == 1) || (param->flags & HABMM_UNIMP_FLAGS_FD_ALREADY_CLOSED))
+		fcnt_idle = 1;
+	else
+		fcnt_idle = 2;
 
 	key.exp.export_id = param->exportid;
 	key.exp.pchan = vchan->pchan;
@@ -619,10 +624,10 @@ int hab_mem_unimport(struct uhab_context *ctx,
 		pr_err("exp id %u unavailable on vc %x\n", param->exportid, vchan->id);
 	} else {
 		export = &exp_super->exp;
-		ret = habmm_imp_hyp_unmap(ctx->import_ctx, export, kernel);
+		ret = habmm_imp_hyp_unmap(ctx->import_ctx, export, fcnt_idle);
 		if (ret != 0) {
 			pr_err("unmap fail id:%d pcnt:%d vcid:%x, vcid-rmt: %x\n",
-			export->export_id, export->payload_count, vchan->id, export->vcid_remote);
+				export->export_id, export->payload_count, vchan->id, export->vcid_remote);
 			exp_super->import_state = EXP_DESC_IMPORTED;
 		} else {
 			param->kva = (uint64_t)export->kva;
