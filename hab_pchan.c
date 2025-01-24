@@ -41,10 +41,9 @@ static void hab_pchan_free(struct kref *ref)
 		container_of(ref, struct physical_channel, refcount);
 	struct virtual_channel *vchan;
 
-	pr_err("pchan %s (refcnt %u) is freed unexpectedly, \
+	pr_debug("pchan %s (refcnt %u) is freed unexpectedly, \
 			and HAB is broken\n",
 			pchan->name, get_refcnt(pchan->refcount));
-	dump_stack();
 
 	write_lock_bh(&pchan->habdev->pchan_lock);
 	list_del(&pchan->node);
