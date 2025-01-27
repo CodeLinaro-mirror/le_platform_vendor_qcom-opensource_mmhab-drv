@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2016-2020, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 #ifndef HABMM_H
 #define HABMM_H
@@ -42,6 +42,8 @@
 #define HABMM_SOCKET_OPEN_FLAGS_SINGLE_BE_SINGLE_DOMU      0x00000001
 /* one BE for all the domUs */
 #define HABMM_SOCKET_OPEN_FLAGS_SINGLE_BE_MULTI_DOMUS      0x00000002
+/* Callback function for virq rx register api */
+typedef int32_t (*virq_rx_cb_t)(int32_t irq, void *priv_data, uint32_t flags);
 
 int32_t habmm_socket_open(int32_t *handle, uint32_t mm_ip_id,
 		uint32_t timeout, uint32_t flags);
@@ -367,6 +369,70 @@ int32_t habmm_import(int32_t handle, void **buff_shared, uint32_t size_bytes,
  */
 int32_t habmm_unimport(int32_t handle, uint32_t export_id, void *buff_shared,
 		uint32_t flags);
+
+/* flags used to differentiate between rx/tx for virtual IRQ */
+#define HABMM_VIRQ_FLAGS_TX       0x00000001U
+#define HABMM_VIRQ_FLAGS_RX       0x00000002U
+
+/*
+ * Description:
+ *
+ * HABMM_VIRQ_REGISTER
+ *
+ * Register virq resource of rx/tx  with HAB using the underlying hypervisor
+ * doorbell api.
+ *
+ * Params:
+ *
+ * handle - handle returned by habmm_virq_register
+ * vmid - Remote vm_id
+ * virq_num - Associated virq id to be used to register and return the handle
+ * rx_cb - Client to register its callback function
+ * rx_priv - Client private data
+ * flags - rx/tx flag
+ *
+ * Return:
+ * status (success/fail)
+ *
+ */
+int32_t habmm_virq_register(int32_t *handle, uint32_t vmid, uint32_t virq_num,
+		virq_rx_cb_t rx_cb, void *rx_priv, uint32_t flags);
+
+/*
+ * Description:
+ *
+ * HABMM_SEND_VIRQ
+ *
+ * Send virq to GVM after tx is registered .
+ *
+ * Params:
+ *
+ * handle - handle returned by habmm_virq_register
+ * flags - future extension
+ *
+ * Return:
+ * status (success/fail)
+ *
+ */
+int32_t habmm_send_virq(int32_t handle, uint32_t flags);
+
+/*
+ * Description:
+ *
+ * HABMM_VIRQ_UNREGISTER
+ *
+ * Unregister virq resource of tx/rx
+ *
+ * Params:
+ *
+ * handle - handle returned by habmm_tvirq_register
+ * flags - decide if its rx or tx
+ *
+ * Return:
+ * status (success/fail)
+ *
+ */
+int32_t habmm_virq_unregister(int32_t handle, uint32_t flags);
 
 /*
  * Description:

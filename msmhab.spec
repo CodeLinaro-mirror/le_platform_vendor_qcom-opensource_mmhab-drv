@@ -36,7 +36,7 @@ This is a rpm contains hab out of tree kernel modules.
 
 %build
 KSRC=%{_usrsrc}/kernels/%{kversion_with_debug}
-make KERNEL_SRC=${KSRC} modules
+make KERNEL_SRC=${KSRC} GUNYAH_DRIVERS_SYSROOT_INCDIR=$RPM_BUILD_ROOT/usr/include modules
 
 %post
 depmod %{kversion_with_debug}
