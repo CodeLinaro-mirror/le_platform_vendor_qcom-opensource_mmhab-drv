@@ -154,7 +154,7 @@ int hab_open_listen(struct uhab_context *ctx,
 	*recv_request = NULL;
 	if (ms_timeout > 0) { /* be timeout case */
 		ms_timeout = (int)msecs_to_jiffies((uint32_t)ms_timeout);
-		ret = wait_event_interruptible_timeout(dev->openq,
+		ret = wait_event_freezable_timeout(dev->openq,
 			hab_open_request_find(ctx, dev, listen, recv_request),
 			ms_timeout);
 		if (ret == 0) {
@@ -174,7 +174,7 @@ int hab_open_listen(struct uhab_context *ctx,
 			pr_err("wait init msg %u fail %d on %s\n",
 				(uint32_t)listen->type, ret, dev->name);
 	} else {
-		ret = wait_event_interruptible(dev->openq,
+		ret = wait_event_freezable(dev->openq,
 			hab_open_request_find(ctx, dev, listen, recv_request));
 		if (ctx->closing != 0) {
 			pr_warn("local closing during open ret %d\n", ret);
