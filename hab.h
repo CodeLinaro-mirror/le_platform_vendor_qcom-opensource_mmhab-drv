@@ -8,17 +8,6 @@
 
 #include "hab_os.h"	/* OS-specific part in the core header file */
 
-#ifdef CONFIG_MSM_VHOST_HAB
-#define spin_lock_bh spin_lock
-#define spin_unlock_bh spin_unlock
-
-#define write_lock_bh write_lock
-#define write_unlock_bh write_unlock
-
-#define read_lock_bh read_lock
-#define read_unlock_bh read_unlock
-#endif
-
 enum hab_payload_type {
 	HAB_PAYLOAD_TYPE_MSG = 0x0,
 	HAB_PAYLOAD_TYPE_INIT,
