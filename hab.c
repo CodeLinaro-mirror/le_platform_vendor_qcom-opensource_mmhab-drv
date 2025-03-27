@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022, 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022, 2024-2025 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 #include "hab.h"
 
@@ -691,9 +691,14 @@ long hab_vchan_send(struct uhab_context *ctx,
 	}
 
 	vchan = hab_get_vchan_fromvcid(vcid, ctx, 0);
-	if ((vchan == NULL) || (vchan->otherend_closed != 0)) {
+	if (vchan == NULL) {
+		pr_debug("cannot get vchan\n");
+		return -ENODEV;
+	}
+	if (vchan->otherend_closed != 0) {
+		pr_debug("vchan %x is otherend closed\n", vchan->id);
 		ret = -ENODEV;
-		goto err;
+		goto err_otherend_closed;
 	}
 
 	/* log msg send timestamp: enter hab_vchan_send */
@@ -706,7 +711,8 @@ long hab_vchan_send(struct uhab_context *ctx,
 			pr_err("wrong profiling buffer size %zd, expect %zd\n",
 				sizebytes,
 				sizeof(struct habmm_xing_vm_stat));
-			return -EINVAL;
+				ret = -EINVAL;
+				goto err;
 		}
 	} else if ((flags & HABMM_SOCKET_XVM_SCHE_TEST) != 0U) {
 		HAB_HEADER_SET_TYPE(header, HAB_PAYLOAD_TYPE_SCHE_MSG);
@@ -717,7 +723,8 @@ long hab_vchan_send(struct uhab_context *ctx,
 			pr_err("Message buffer too small, %lu bytes, expect %d\n",
 				sizebytes,
 				sizeof(unsigned long long));
-			return -EINVAL;
+				ret = -EINVAL;
+				goto err;
 		}
 		HAB_HEADER_SET_TYPE(header, HAB_PAYLOAD_TYPE_SCHE_RESULT_REQ);
 	} else if ((flags & HABMM_SOCKET_XVM_SCHE_RESULT_RSP) != 0U) {
@@ -725,7 +732,8 @@ long hab_vchan_send(struct uhab_context *ctx,
 			pr_err("Message buffer too small, %lu bytes, expect %d\n",
 				sizebytes,
 				3 * sizeof(unsigned long long));
-			return -EINVAL;
+				ret = -EINVAL;
+				goto err;
 		}
 		HAB_HEADER_SET_TYPE(header, HAB_PAYLOAD_TYPE_SCHE_RESULT_RSP);
 	} else {
@@ -750,11 +758,11 @@ long hab_vchan_send(struct uhab_context *ctx,
 	 */
 	if (ret == 0)
 		vchan->tx_cnt++;
-err:
 
+err:
 	/* log msg send timestamp: exit hab_vchan_send */
 	trace_hab_vchan_send_done(vchan);
-
+err_otherend_closed:
 	hab_vchan_put(vchan);
 
 	return ret;
