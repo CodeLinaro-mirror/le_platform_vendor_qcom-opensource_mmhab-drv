@@ -85,35 +85,35 @@ struct vhost_config {
         __u8 *data;
 };
 
-#define HAB_IOC_TYPE 0x0A
+#define HAB_IOC_TYPE 0x0AU
 
 #define IOCTL_HAB_SEND \
-	_IOW(HAB_IOC_TYPE, 0x2, struct hab_send)
+	_IOW(HAB_IOC_TYPE, 0x2U, struct hab_send)
 
 #define IOCTL_HAB_RECV \
-	_IOWR(HAB_IOC_TYPE, 0x3, struct hab_recv)
+	_IOWR(HAB_IOC_TYPE, 0x3U, struct hab_recv)
 
 #define IOCTL_HAB_VC_OPEN \
-	_IOWR(HAB_IOC_TYPE, 0x4, struct hab_open)
+	_IOWR(HAB_IOC_TYPE, 0x4U, struct hab_open)
 
 #define IOCTL_HAB_VC_CLOSE \
-	_IOW(HAB_IOC_TYPE, 0x5, struct hab_close)
+	_IOW(HAB_IOC_TYPE, 0x5U, struct hab_close)
 
 #define IOCTL_HAB_VC_EXPORT \
-	_IOWR(HAB_IOC_TYPE, 0x6, struct hab_export)
+	_IOWR(HAB_IOC_TYPE, 0x6U, struct hab_export)
 
 #define IOCTL_HAB_VC_IMPORT \
-	_IOWR(HAB_IOC_TYPE, 0x7, struct hab_import)
+	_IOWR(HAB_IOC_TYPE, 0x7U, struct hab_import)
 
 #define IOCTL_HAB_VC_UNEXPORT \
-	_IOW(HAB_IOC_TYPE, 0x8, struct hab_unexport)
+	_IOW(HAB_IOC_TYPE, 0x8U, struct hab_unexport)
 
 #define IOCTL_HAB_VC_UNIMPORT \
-	_IOW(HAB_IOC_TYPE, 0x9, struct hab_unimport)
+	_IOW(HAB_IOC_TYPE, 0x9U, struct hab_unimport)
 
 #define IOCTL_HAB_VC_QUERY \
-	_IOWR(HAB_IOC_TYPE, 0xA, struct hab_info)
+	_IOWR(HAB_IOC_TYPE, 0xAU, struct hab_info)
 
-#define VHOST_SET_CONFIG _IOW(VHOST_VIRTIO, 0x70, struct vhost_config)
+#define VHOST_SET_CONFIG _IOW(VHOST_VIRTIO, 0x70U, struct vhost_config)
 
 #endif /* _HAB_IOCTL_H */

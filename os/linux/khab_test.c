@@ -15,7 +15,7 @@ static int pid_stat;
 static ssize_t vchan_show(struct kobject *kobj, struct kobj_attribute *attr,
 						char *buf)
 {
-	return hab_stat_show_vchan(&hab_driver, buf, PAGE_SIZE);
+	return hab_stat_show_vchan(&hab_driver, buf, (int)PAGE_SIZE);
 }
 
 static ssize_t vchan_store(struct kobject *kobj, struct kobj_attribute *attr,
@@ -28,13 +28,13 @@ static ssize_t vchan_store(struct kobject *kobj, struct kobj_attribute *attr,
 		pr_err("failed to read anything from input %d\n", ret);
 		return 0;
 	} else
-		return count;
+		return (ssize_t)count;
 }
 
 static ssize_t ctx_show(struct kobject *kobj, struct kobj_attribute *attr,
 						char *buf)
 {
-	return hab_stat_show_ctx(&hab_driver, buf, PAGE_SIZE);
+	return hab_stat_show_ctx(&hab_driver, buf, (int)PAGE_SIZE);
 }
 
 static ssize_t ctx_store(struct kobject *kobj, struct kobj_attribute *attr,
@@ -47,13 +47,13 @@ static ssize_t ctx_store(struct kobject *kobj, struct kobj_attribute *attr,
 		pr_err("failed to read anything from input %d\n", ret);
 		return 0;
 	} else
-		return count;
+		return (ssize_t)count;
 }
 
 static ssize_t expimp_show(struct kobject *kobj, struct kobj_attribute *attr,
 						char *buf)
 {
-	return hab_stat_show_expimp(&hab_driver, pid_stat, buf, PAGE_SIZE);
+	return hab_stat_show_expimp(&hab_driver, pid_stat, buf, (int)PAGE_SIZE);
 }
 
 static ssize_t expimp_store(struct kobject *kobj, struct kobj_attribute *attr,
@@ -64,7 +64,7 @@ static ssize_t expimp_store(struct kobject *kobj, struct kobj_attribute *attr,
 	struct uhab_context *ctx = NULL;
 	struct virtual_channel *vchan = NULL;
 
-	if (buf) {
+	if (buf != NULL) {
 		ret = sscanf(buf, "%35s", str);
 		if (ret < 1) {
 			pr_err("failed to read anything from input %d\n", ret);
@@ -80,27 +80,27 @@ static ssize_t expimp_store(struct kobject *kobj, struct kobj_attribute *attr,
 			if (ctx->owner == pid_stat) {
 				vchan = list_first_entry(&ctx->vchannels,
 					struct virtual_channel, node);
-				if (vchan) {
+				if (vchan != NULL) {
 					dump_hab_wq(vchan->pchan); /* user context */
 					break;
 				}
 			}
 		}
-		return count;
+		return (ssize_t)count;
 	}
 
 	ret = sscanf(buf, "%du", &pid_stat);
 	if (ret < 1)
 		pr_err("failed to read anything from input %d\n", ret);
 	else
-		return count; /* good result stored */
+		return (ssize_t)count; /* good result stored */
 	return -EEXIST;
 }
 
 static ssize_t reclaim_show(struct kobject *kobj, struct kobj_attribute *attr,
 						char *buf)
 {
-	return hab_stat_show_reclaim(&hab_driver, buf, PAGE_SIZE);
+	return hab_stat_show_reclaim(&hab_driver, buf, (int)PAGE_SIZE);
 }
 
 static ssize_t reclaim_store(struct kobject *kobj, struct kobj_attribute *attr,
@@ -130,23 +130,23 @@ int hab_stat_init_sub(struct hab_driver *driver)
 	int result;
 
 	hab_kobject = kobject_create_and_add("hab", kernel_kobj);
-	if (!hab_kobject)
+	if (hab_kobject == NULL)
 		return -ENOMEM;
 
 	result = sysfs_create_file(hab_kobject, &vchan_attribute.attr);
-	if (result)
+	if (result != 0)
 		pr_debug("cannot add vchan in /sys/kernel/hab %d\n", result);
 
 	result = sysfs_create_file(hab_kobject, &ctx_attribute.attr);
-	if (result)
+	if (result != 0)
 		pr_debug("cannot add ctx in /sys/kernel/hab %d\n", result);
 
 	result = sysfs_create_file(hab_kobject, &expimp_attribute.attr);
-	if (result)
+	if (result != 0)
 		pr_debug("cannot add expimp in /sys/kernel/hab %d\n", result);
 
 	result = sysfs_create_file(hab_kobject, &reclaim_attribute.attr);
-	if (result)
+	if (result != 0)
 		pr_debug("cannot add reclaim in /sys/kernel/hab %d\n", result);
 
 	return result;
@@ -165,14 +165,14 @@ int hab_stat_deinit_sub(struct hab_driver *driver)
 int dump_hab_get_file_name(char *file_time, int ft_size)
 {
 	struct timespec64 ts = {0};
-	unsigned long local_time;
+	time64_t local_time;
 	struct rtc_time now;
 
 	ktime_get_real_ts64(&ts);
-	local_time = (unsigned long)(ts.tv_sec - sys_tz.tz_minuteswest * 60);
+	local_time = (time64_t)ts.tv_sec - (time64_t)sys_tz.tz_minuteswest * 60;
 	rtc_time64_to_tm(local_time, &now);
 
-	(void)snprintf(file_time, ft_size, "%04d_%02d_%02d-%02d_%02d_%02d",
+	(void)snprintf(file_time, (uint32_t)ft_size, "%04d_%02d_%02d-%02d_%02d_%02d",
 		now.tm_year + 1900, now.tm_mon + 1, now.tm_mday, now.tm_hour,
 		now.tm_min, now.tm_sec);
 

@@ -18,7 +18,7 @@ static int hab_open(struct inode *inodep, struct file *filep)
 
 	ctx = hab_ctx_alloc(0);
 
-	if (!ctx) {
+	if (ctx == NULL) {
 		pr_err("hab_ctx_alloc failed\n");
 		filep->private_data = NULL;
 		return -ENOMEM;
@@ -38,7 +38,7 @@ static int hab_release(struct inode *inodep, struct file *filep)
 	struct virtual_channel *vchan, *tmp;
 	struct hab_open_node *node;
 
-	if (!ctx)
+	if (ctx == NULL)
 		return 0;
 
 	pr_debug("inode %pK, filep %pK ctx %pK\n", inodep, filep, ctx);
@@ -61,7 +61,7 @@ static int hab_release(struct inode *inodep, struct file *filep)
 	/* notify remote side on pending open */
 	list_for_each_entry(node, &ctx->pending_open, node) {
 		/* no touch to the list itself. it is allocated on the stack */
-		if (hab_open_cancel_notify(&node->request))
+		if (hab_open_cancel_notify(&node->request) != 0)
 			pr_err("failed to send open cancel vcid %x subid %d openid %d pchan %s\n",
 					node->request.xdata.vchan_id,
 					node->request.xdata.sub_id,
@@ -85,11 +85,11 @@ static long hab_copy_data(struct hab_message *msg, struct hab_recv *recv_param)
 
 	if (unlikely(msg->scatter)) {
 		/* The maximum size of msg is limited in hab_msg_alloc */
-		for (i = 0; i < msg->sizebytes / PAGE_SIZE; i++) {
-			dest = (uint64_t)(recv_param->data) + (uint64_t)(i * PAGE_SIZE);
+		for (i = 0; (unsigned long)i < msg->sizebytes / PAGE_SIZE; i++) {
+			dest = (uint64_t)(recv_param->data) + (uint64_t)((unsigned long)i * PAGE_SIZE);
 			if (copy_to_user((void __user *)dest,
 					scatter_buf[i],
-					PAGE_SIZE)) {
+					PAGE_SIZE) != 0U) {
 				pr_err("copy_to_user failed: vc=%x size=%d\n",
 				recv_param->vcid, (int)msg->sizebytes);
 				recv_param->sizebytes = 0;
@@ -97,11 +97,11 @@ static long hab_copy_data(struct hab_message *msg, struct hab_recv *recv_param)
 				break;
 			}
 		}
-		if ((ret != -EFAULT) && (msg->sizebytes % PAGE_SIZE)) {
-			dest = (uint64_t)(recv_param->data) + (uint64_t)(i * PAGE_SIZE);
+		if ((ret != -EFAULT) && ((msg->sizebytes % PAGE_SIZE) != 0U)) {
+			dest = (uint64_t)(recv_param->data) + (uint64_t)((unsigned long)i * PAGE_SIZE);
 			if (copy_to_user((void __user *)dest,
 					scatter_buf[i],
-					msg->sizebytes % PAGE_SIZE)) {
+					msg->sizebytes % PAGE_SIZE) != 0U) {
 				pr_err("copy_to_user failed: vc=%x size=%d\n",
 				recv_param->vcid, (int)msg->sizebytes);
 				recv_param->sizebytes = 0;
@@ -111,7 +111,7 @@ static long hab_copy_data(struct hab_message *msg, struct hab_recv *recv_param)
 	} else {
 		if (copy_to_user((void __user *)recv_param->data,
 				msg->data,
-				msg->sizebytes)) {
+				msg->sizebytes) != 0U) {
 			pr_err("copy_to_user failed: vc=%x size=%d\n",
 			recv_param->vcid, (int)msg->sizebytes);
 			recv_param->sizebytes = 0;
@@ -139,8 +139,8 @@ static long hab_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 	if (_IOC_SIZE(cmd) && (cmd & IOC_INOUT)) {
 		if (_IOC_SIZE(cmd) > sizeof(data))
 			return -EINVAL;
-		
-		if (cmd & IOC_IN)
+
+		if ((cmd & IOC_IN) != 0U)
 			if (copy_from_user(data, (void __user *)arg, _IOC_SIZE(cmd))) {
 				pr_err("copy_from_user failed cmd=%x size=%d\n",
 					cmd, _IOC_SIZE(cmd));
@@ -153,7 +153,7 @@ static long hab_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 		open_param = (struct hab_open *)data;
 		ret = hab_vchan_open(ctx, open_param->mmid,
 			&open_param->vcid,
-			open_param->timeout,
+			(int32_t)open_param->timeout,
 			open_param->flags);
 		break;
 	case IOCTL_HAB_VC_CLOSE:
@@ -168,13 +168,13 @@ static long hab_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 		}
 
 		send_data = kzalloc(send_param->sizebytes, GFP_KERNEL);
-		if (!send_data) {
+		if (send_data == NULL) {
 			ret = -ENOMEM;
 			break;
 		}
 
 		if (copy_from_user(send_data, (void __user *)send_param->data,
-				send_param->sizebytes)) {
+				send_param->sizebytes) != 0U) {
 			ret = -EFAULT;
 		} else {
 			ret = hab_vchan_send(ctx, send_param->vcid,
@@ -186,7 +186,7 @@ static long hab_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 		break;
 	case IOCTL_HAB_RECV:
 		recv_param = (struct hab_recv *)data;
-		if (!recv_param->data) {
+		if (recv_param->data == NULL) {
 			ret = -EINVAL;
 			break;
 		}
@@ -195,7 +195,7 @@ static long hab_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 				&recv_param->sizebytes, recv_param->timeout,
 				recv_param->flags);
 
-		if (msg) {
+		if (msg != NULL) {
 			if (ret == 0)
 				ret = hab_copy_data(msg, recv_param);
 			else
@@ -220,7 +220,7 @@ static long hab_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 		break;
 	case IOCTL_HAB_VC_QUERY:
 		info_param = (struct hab_info *)data;
-		if (!info_param->names || !info_param->namesize ||
+		if ((info_param->names == 0U) || (info_param->namesize == 0U) ||
 			info_param->namesize > sizeof(names)) {
 			pr_err("wrong param for vm info vcid %X, names %llX, sz %d\n",
 					info_param->vcid, info_param->names,
@@ -231,10 +231,10 @@ static long hab_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 		ret = hab_vchan_query(ctx, info_param->vcid,
 				(uint64_t *)&info_param->ids,
 				 names, info_param->namesize, 0);
-		if (!ret) {
+		if (ret == 0) {
 			if (copy_to_user((void __user *)info_param->names,
 						 names,
-						 info_param->namesize)) {
+						 info_param->namesize) != 0U) {
 				pr_err("copy_to_user failed: vc=%x size=%d\n",
 						info_param->vcid,
 						info_param->namesize*2);
@@ -333,7 +333,7 @@ static void reclaim_cleanup(struct work_struct *reclaim_work)
 	spin_lock(&hab_driver.reclaim_lock);
 	list_for_each_entry_safe(export, exp_tmp, &hab_driver.reclaim_list, node) {
 		exp_super = container_of(export, struct export_desc_super, exp);
-		if (exp_super->remote_imported == 0)
+		if (exp_super->remote_imported == 0U)
 			list_move(&export->node, &free_list);
 	}
 	spin_unlock(&hab_driver.reclaim_lock);
@@ -360,7 +360,7 @@ struct export_desc_super *hab_rb_exp_find(struct rb_root *root, struct export_de
 	struct rb_node *node = root->rb_node;
 	struct export_desc_super *exp_super;
 
-	while(node) {
+	while (node != NULL) {
 		exp_super = rb_entry(node, struct export_desc_super, node);
 		if (key->exp.export_id < exp_super->exp.export_id)
 			node = node->rb_left;
@@ -383,7 +383,7 @@ struct export_desc_super *hab_rb_exp_insert(struct rb_root *root, struct export_
 {
 	struct rb_node **new = &(root->rb_node), *parent = NULL;
 
-	while (*new) {
+	while (*new != NULL) {
 		struct export_desc_super *this = rb_entry(*new, struct export_desc_super, node);
 		parent = *new;
 		if (exp_super->exp.export_id < this->exp.export_id)
@@ -435,7 +435,7 @@ static int __init hab_init(void)
 
 	hab_driver.class = class_create("hab");
 	if (IS_ERR(hab_driver.class)) {
-		result = PTR_ERR(hab_driver.class);
+		result = (int)PTR_ERR(hab_driver.class);
 		pr_err("class_create failed: %d\n", result);
 		goto err;
 	}
@@ -445,13 +445,13 @@ static int __init hab_init(void)
 	hab_driver.dev = device;
 
 	if (IS_ERR(hab_driver.dev)) {
-		result = PTR_ERR(hab_driver.dev);
+		result = (int)PTR_ERR(hab_driver.dev);
 		pr_err("device_create failed: %d\n", result);
 		goto err;
 	}
 
 	result = register_reboot_notifier(&hab_reboot_notifier);
-	if (result)
+	if (result != 0)
 		pr_err("failed to register reboot notifier %d\n", result);
 
 	INIT_WORK(&hab_driver.reclaim_work, reclaim_cleanup);
@@ -459,9 +459,9 @@ static int __init hab_init(void)
 	/* read in hab config, then configure pchans */
 	result = do_hab_parse();
 
-	if (!result) {
+	if (result == 0) {
 		hab_driver.kctx = hab_ctx_alloc(1);
-		if (!hab_driver.kctx) {
+		if (hab_driver.kctx == NULL) {
 			pr_err("hab_ctx_alloc failed\n");
 			result = -ENOMEM;
 			hab_hypervisor_unregister();
@@ -473,7 +473,7 @@ static int __init hab_init(void)
 					DMA_BIT_MASK(64));
 
 			/* System dma_ops failed, fallback to dma_ops of hab */
-			if (result) {
+			if (result != 0) {
 				pr_warn("config system dma_ops failed %d, fallback to hab\n",
 						result);
 				hab_driver.dev->bus = NULL;

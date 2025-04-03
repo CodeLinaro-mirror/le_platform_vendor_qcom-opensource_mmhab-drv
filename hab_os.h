@@ -40,6 +40,7 @@
 #include <linux/delay.h>
 #include <linux/version.h>
 #include <linux/devcoredump.h>
+#include <linux/freezer.h>
 
 void hab_rb_init(struct rb_root *root);
 
