@@ -39,6 +39,21 @@
 
 #define FIRST_LA_GVM_VMID 2
 
+/*
+ * The priority here is intentionally lower than MAX_RT_PRIO / 2(49).
+ * Because in RT kernel the execution contextes of below entities
+ * - IRQ handler allocated via request_irq/request_threaded_irq
+ * - IRQ thread_fn allocated via request_threaded_irq
+ * - SoftIRQ
+ * are all kthreads with FIFO schedule policy + 49 priority set via
+ * sched_set_fifo().
+ * Thus, HAB Vhost worker shall use lower priority to prevent from
+ * preempting above three entities.
+ */
+#define HAB_VHOST_WORKER_PRIO_HIGH (MAX_RT_PRIO / 2 - 1)
+
+#define HAB_VHOST_WORKER_PRIO_MED 10
+
 enum {
 	VHOST_HAB_PCHAN_TX_VQ = 0, /* receive data from gvm */
 	VHOST_HAB_PCHAN_RX_VQ, /* send data to gvm */
@@ -155,20 +170,9 @@ static void tx_worker(struct vhost_hab_pchannel *vh_pchan)
 	ssize_t copy_size;
 	struct hab_header header;
 	unsigned int policy = current->policy;
-	int prio = MAX_RT_PRIO / 2 - 1;
+	int prio = HAB_VHOST_WORKER_PRIO_MED;
 	struct sched_attr attr = {
 		.sched_policy = SCHED_FIFO,
-		/*
-		 * The priority here is intentionally lower than MAX_RT_PRIO / 2(49).
-		 * Because in RT kernel the execution contextes of below entities
-		 * - IRQ handler allocated via request_irq/request_threaded_irq
-		 * - IRQ thread_fn allocated via request_threaded_irq
-		 * - SoftIRQ
-		 * are all kthreads with FIFO schedule policy + 49 priority set via
-		 * sched_set_fifo().
-		 * Thus, HAB Vhost worker shall use lower priority to prevent from
-		 * preempting above three entities.
-		 */
 		.sched_priority = (uint32_t)prio,
 	};
 
@@ -958,7 +962,7 @@ static void rx_worker(struct vhost_hab_pchannel *vh_pchan)
 	struct vhost_dev *dev = vq->dev;
 	int ret = 0, has_send = 1, added = 0;
 	unsigned int policy = current->policy;
-	int prio = MAX_RT_PRIO / 2 - 1;
+	int prio = HAB_VHOST_WORKER_PRIO_MED;
 	struct sched_attr attr = {
 		.sched_policy = SCHED_FIFO,
 		/* refer tx_worker's priority and sched policy */
