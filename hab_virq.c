@@ -129,8 +129,13 @@ struct hvirq_dbl *hab_virtirq_freelabel_find(int vmid_remote, int virq_num)
 	for (i = 0 ; i < HAB_VIRTIRQ_MAX; i++) {
 		dbl = g_virtirq_dev[i][vmid_remote].dbl;
 		if (dbl == NULL) {
-			pr_err("dbl is NULL for virq_num %d\n", virq_num);
-			return NULL;
+			/* continue to traverse the array even if dbl == NULL is found
+			 * this only means that virtual irq list has a failure while
+			 * setting up one of the dbl structure at that index,
+			 * we still need to traverse the entire array of dbl struct to
+			 * check if matching label is found */
+			pr_err("dbl is NULL for virq_num %d at index %d\n", virq_num, i);
+			continue;
 		} else if (!dbl->virq_registered && (dbl->dom_id == vmid_remote)
 				&& (dbl->virtirq_num == virq_num)) {
 			return dbl;
