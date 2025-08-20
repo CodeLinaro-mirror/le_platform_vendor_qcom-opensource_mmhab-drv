@@ -205,12 +205,14 @@ static void pages_list_destroy(struct kref *refcount)
 		HAB_HEADER_SET_ID(header, HAB_VCID_UNIMPORT);
 		HAB_HEADER_SET_SESSION_ID(header, HAB_SESSIONID_UNIMPORT);
 		ret = physical_channel_send(pglist->pchan, &header, &pglist->export_id);
-		if (ret)
+		/* skip error log if pchan is rmt closed to reduce log in GVM restart scenario */
+		if (ret && (ret != -ENODEV))
 			pr_err("unimp msg sent fail %d, vcid %x, expid %d, pg nr %ld\n",
 				ret, pglist->vcid, pglist->export_id, pglist->npages);
 		else
-			pr_debug("unimp msg sent, expid %d, vcid %x, pg nr %ld\n",
-			    pglist->export_id, pglist->vcid, pglist->npages);
+			pr_debug("unimp msg send ret %d, expid %d, vcid %x, pg nr %ld, pchan rmt closed %d\n",
+			    ret, pglist->export_id, pglist->vcid,
+				pglist->npages, pglist->pchan->otherend_closed);
 	}
 
 	vfree(pglist->pages);
