@@ -246,8 +246,32 @@ int32_t habmm_socket_recvfrom(int32_t handle, void *dst_buff,
 /* exporting memory type DMA : This is platform dependent for user mode. If it
  * does exist, HAB needs to use DMA method to retrieve the memory for exporting.
  * If it does not exist, this flag is ignored.
+ *
+ * Only supported on Linux.
+ * Indicates that the memory allocator is based on the dma-buf framework.
  */
 #define HABMM_EXP_MEM_TYPE_DMA 0x00000001U
+
+/*
+ * Exporting memory type: Loopback
+ *
+ * Loopback memory refers to memory originally allocated by a remote OS,
+ * exported by the remote HAB, imported locally, and then re-exported back
+ * to the same remote HAB.
+ *
+ * This flag must be used in combination with one of the following:
+ *   - HABMM_EXPIMP_FLAGS_FD
+ *   - HABMM_EXPIMP_FLAGS_DMABUF (in kernel only)
+ *
+ * Only memory handles are supported for loopback export.
+ *
+ * Supported flag combinations:
+ *   - Exporting a dma-buf FD:
+ *       HABMM_EXPIMP_FLAGS_FD | HABMM_EXP_MEM_TYPE_LOOPBACK
+ *   - Exporting a dma-buf pointer (kernel only):
+ *       HABMM_EXPIMP_FLAGS_DMABUF | HABMM_EXP_MEM_TYPE_LOOPBACK
+ */
+#define HABMM_EXP_MEM_TYPE_LOOPBACK 0x00000002U
 
 /*
  * this flag is used for export from dma_buf fd or import to dma_buf fd

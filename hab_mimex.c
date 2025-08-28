@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022, 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 #include "hab.h"
 #include "hab_grantable.h"
@@ -169,6 +169,9 @@ struct export_desc_super *habmem_add_export(
 	export->vcid_remote = vchan->otherend_id;
 	export->domid_local = vchan->pchan->vmid_local;
 	export->domid_remote = vchan->pchan->vmid_remote;
+
+	if ((HABMM_EXP_MEM_TYPE_LOOPBACK & flags) != 0)
+		exp_super->is_loopback = true;
 
 	/*
 	 * In new protocol, exp_desc will not be sent to remote during hab export.
