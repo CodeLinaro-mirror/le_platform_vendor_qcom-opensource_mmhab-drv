@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022, 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 #include "hab.h"
 #include "hab_grantable.h"
@@ -286,9 +286,12 @@ static int hab_send_import_ack(struct virtual_channel *vchan,
 	struct export_desc_super *exp_super = container_of(export, struct export_desc_super, exp);
 	uint32_t sizebytes = (uint32_t)sizeof(*export) + exp_super->payload_size;
 	struct hab_header header = HAB_HEADER_INITIALIZER;
+	enum hab_payload_type type;
+
+	type = exp_super->is_loopback ? HAB_PAYLOAD_TYPE_IMPORT_LOOPBACK_ACK : HAB_PAYLOAD_TYPE_IMPORT_ACK;
 
 	HAB_HEADER_SET_SIZE(header, sizebytes);
-	HAB_HEADER_SET_TYPE(header, HAB_PAYLOAD_TYPE_IMPORT_ACK);
+	HAB_HEADER_SET_TYPE(header, type);
 	HAB_HEADER_SET_ID(header, vchan->otherend_id);
 	HAB_HEADER_SET_SESSION_ID(header, vchan->session_id);
 
@@ -428,22 +431,20 @@ static int hab_receive_create_export_ack(struct physical_channel *pchan,
 
 static int hab_receive_export_desc(struct physical_channel *pchan,
 					struct virtual_channel *vchan,
-					 size_t sizebytes)
+					size_t sizebytes,
+					struct export_desc **exp_desc)
 {
-	struct hab_import_ack_recvd *ack_recvd = NULL;
-	size_t exp_desc_size_expected = 0;
-	struct export_desc *exp_desc = NULL;
+	size_t exp_desc_size_minimum;
+	struct export_desc *export;
 	struct export_desc_super *exp_desc_super = NULL;
-	struct compressed_pfns *pfn_table = NULL;
-	int irqs_disabled = irqs_disabled();
-	int ret = 0;
+	*exp_desc = NULL;
 
-	exp_desc_size_expected = sizeof(struct export_desc)
-							+ sizeof(struct compressed_pfns);
+	exp_desc_size_minimum = sizeof(struct export_desc)
+							+ sizeof(struct lb_mem_info);
 	if (sizebytes > (size_t)(HAB_HEADER_SIZE_MAX) ||
-			sizebytes < exp_desc_size_expected) {
-		pr_err("%s exp size too large/small %zu header %zu\n",
-				pchan->name, sizebytes, sizeof(*exp_desc));
+			sizebytes < exp_desc_size_minimum) {
+		pr_err("%x exp size too large/small %zu header %zu %u\n",
+				vchan->id, sizebytes, sizeof(struct export_desc), exp_desc_size_minimum);
 		return -EINVAL;
 	}
 
@@ -454,28 +455,48 @@ static int hab_receive_export_desc(struct physical_channel *pchan,
 	if (exp_desc_super == NULL)
 		return -ENOMEM;
 
-	exp_desc = &exp_desc_super->exp;
+	export = &exp_desc_super->exp;
 
-	if ((uint32_t)physical_channel_read(pchan, exp_desc, sizebytes) != sizebytes) {
-		pr_err("%s corrupted exp expect %zd bytes vcid %X remote %X open %d!\n",
-			pchan->name, sizebytes, vchan->id,
+	if ((uint32_t)physical_channel_read(pchan, export, sizebytes) != sizebytes) {
+		pr_err("corrupted exp expect %zd bytes vcid %X remote %X open %d!\n",
+			sizebytes, vchan->id,
 			vchan->otherend_id, vchan->session_id);
 		kfree(exp_desc_super);
 		return -EIO;
 	}
 
-	if (pchan->vmid_local != exp_desc->domid_remote ||
-	  pchan->vmid_remote != exp_desc->domid_local)
+	if (pchan->vmid_local != export->domid_remote ||
+	  pchan->vmid_remote != export->domid_local)
 		pr_err("corrupted vmid %d != %d %d != %d\n",
-			pchan->vmid_local, exp_desc->domid_remote,
-			pchan->vmid_remote, exp_desc->domid_local);
-	exp_desc->domid_remote = pchan->vmid_remote;
-	exp_desc->domid_local = pchan->vmid_local;
-	exp_desc->pchan = pchan;
+			pchan->vmid_local, export->domid_remote,
+			pchan->vmid_remote, export->domid_local);
+	export->domid_remote = pchan->vmid_remote;
+	export->domid_local = pchan->vmid_local;
+	/*
+	 * re-init pchan, vchan to local pointers for local usage.
+	 * exp->ctx is left un-initialized due to no local usage.
+	 */
+	export->pchan = pchan;
+	export->vchan = vchan;
+
 	if (pchan->mem_proto == 1U) {
-		exp_desc->vcid_remote = exp_desc->vcid_local;
-		exp_desc->vcid_local = vchan->id;
+		export->vcid_remote = export->vcid_local;
+		export->vcid_local = vchan->id;
 	}
+	*exp_desc = &exp_desc_super->exp;
+
+	return 0;
+}
+
+static int compressed_pfns_sanity_check(struct virtual_channel *vchan,
+	struct export_desc *exp_desc, size_t sizebytes)
+{
+	struct compressed_pfns *pfn_table;
+	size_t exp_desc_size_expected;
+	int ret = 0;
+
+	exp_desc_size_expected = sizeof(struct export_desc) +
+		sizeof(struct compressed_pfns);
 
 	/*
 	 * We should do all the checks here.
@@ -490,33 +511,61 @@ static int hab_receive_export_desc(struct physical_channel *pchan,
 	   ((uint32_t)pfn_table->nregions > SIZE_MAX / sizeof(struct region)) ||
 	   (SIZE_MAX - exp_desc_size_expected <
 	   (uint32_t)pfn_table->nregions * sizeof(struct region))) {
-		pr_err("%s nregions is too large or negative, nregions:%d!\n",
-				pchan->name, pfn_table->nregions);
+		pr_err("%x nregions is too large or negative, nregions:%d!\n",
+				vchan->id, pfn_table->nregions);
 		ret = -EINVAL;
-		goto err_imp;
+		goto sanity_fail;
 	}
 
 	if (pfn_table->nregions > exp_desc->payload_count) {
-		pr_err("%s nregions %d greater than payload_count %d\n",
-			pchan->name, pfn_table->nregions, exp_desc->payload_count);
+		pr_err("%x nregions %d greater than payload_count %d\n",
+			vchan->id, pfn_table->nregions, exp_desc->payload_count);
 		ret = -EINVAL;
-		goto err_imp;
+		goto sanity_fail;
 	}
 
 	if (exp_desc->payload_count > MAX_EXP_PAYLOAD_COUNT) {
 		pr_err("payload_count out of range: %d size overflow\n",
 			exp_desc->payload_count);
 		ret = -EINVAL;
-		goto err_imp;
+		goto sanity_fail;
 	}
 
 	exp_desc_size_expected += (uint32_t)pfn_table->nregions * sizeof(struct region);
 	if (sizebytes != exp_desc_size_expected) {
-		pr_err("%s exp size not equal %zu expect %zu\n",
-			pchan->name, sizebytes, exp_desc_size_expected);
+		pr_err("%x exp size not equal %zu expect %zu\n",
+			vchan->id, sizebytes, exp_desc_size_expected);
 		ret = -EINVAL;
-		goto err_imp;
 	}
+
+sanity_fail:
+	return ret;
+}
+
+static int hab_recv_and_enqueue_export_desc(struct physical_channel *pchan,
+					struct virtual_channel *vchan,
+					size_t sizebytes,
+					bool is_lb)
+{
+	struct hab_import_ack_recvd *ack_recvd = NULL;
+	struct export_desc *exp_desc = NULL;
+	struct export_desc_super *exp_desc_super = NULL;
+	int irqs_disabled = irqs_disabled();
+	int ret = 0;
+
+	ret = hab_receive_export_desc(pchan, vchan, sizebytes, &exp_desc);
+	if (ret != 0)
+		return ret;
+
+	/* sanity for loopback payload (mmid & expid) will be checked later */
+	if (likely(!is_lb)) {
+		ret = compressed_pfns_sanity_check(vchan, exp_desc, sizebytes);
+		if (ret != 0)
+			goto err_imp;
+	}
+
+	exp_desc_super = container_of(exp_desc, struct export_desc_super, exp);
+	exp_desc_super->is_loopback = is_lb;
 
 	if (pchan->mem_proto == 1U) {
 		ack_recvd = kzalloc(sizeof(*ack_recvd), GFP_ATOMIC);
@@ -602,6 +651,7 @@ static void hab_recv_unimport_msg(struct physical_channel *pchan, int vchan_exis
 				pchan->name, exp_id);
 	} else
 		pr_err("invalid unimp msg recv on %s, exp id %u\n", pchan->name, exp_id);
+
 	hab_spin_unlock(&pchan->expid_lock, irqs_disabled);
 
 	if (vchan_exist == 0)
@@ -733,7 +783,7 @@ int hab_msg_recv(struct physical_channel *pchan,
 		break;
 
 	case HAB_PAYLOAD_TYPE_EXPORT:
-		ret = hab_receive_export_desc(pchan, vchan, sizebytes);
+		ret = hab_recv_and_enqueue_export_desc(pchan, vchan, sizebytes, false);
 		if (ret != 0)
 			pr_err("failed to handle exp msg on vcid %x, ret %d\n",
 				vchan->id, ret);
@@ -835,9 +885,18 @@ int hab_msg_recv(struct physical_channel *pchan,
 		break;
 
 	case HAB_PAYLOAD_TYPE_IMPORT_ACK:
-		ret = hab_receive_export_desc(pchan, vchan, sizebytes);
+		ret = hab_recv_and_enqueue_export_desc(pchan, vchan, sizebytes, false);
 		if (ret != 0)
-			pr_err("%s failed to handle import ack %d\n", pchan->name, ret);
+			pr_err("%x failed to handle import ack %d\n", vchan->id, ret);
+
+		/* always try to wake up importer when any failure happens */
+		wake_up_interruptible(&vchan->ctx->imp_wq);
+		break;
+
+	case HAB_PAYLOAD_TYPE_IMPORT_LOOPBACK_ACK:
+		ret = hab_recv_and_enqueue_export_desc(pchan, vchan, sizebytes, true);
+		if (ret != 0)
+			pr_err("%x failed to handle import loopback ack %d\n", vchan->id, ret);
 
 		/* always try to wake up importer when any failure happens */
 		wake_up_interruptible(&vchan->ctx->imp_wq);

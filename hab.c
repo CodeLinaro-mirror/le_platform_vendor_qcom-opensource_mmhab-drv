@@ -195,30 +195,39 @@ void hab_ctx_free(struct kref *ref)
 			export->export_id, export->vcid_local,
 			ctx->import_total);
 		ret = habmm_imp_hyp_unmap(ctx->import_ctx, export, 1);
-		if (export->pchan->mem_proto == 1U) {
-			if (ret == 0) {
-				/*
-				 * even if imp_hyp_unmap return success, it is still an unexpected scenario:
-				 * HAB client exits/crashes/gets killed before unimport all imported memory
-				 */
-				pr_warn("unimp msg sent for exp id %u on %s\n",
-					export->export_id, export->pchan->name);
-				HAB_HEADER_SET_TYPE(header, HAB_PAYLOAD_TYPE_UNIMPORT);
-				HAB_HEADER_SET_SIZE(header, sizeof(uint32_t));
-				HAB_HEADER_SET_ID(header, HAB_VCID_UNIMPORT);
-				HAB_HEADER_SET_SESSION_ID(header, HAB_SESSIONID_UNIMPORT);
-				ret = physical_channel_send(export->pchan, &header, &export->export_id);
-				if (ret != 0)
-					pr_err("failed to send unimp msg %d, vcid %X, exp id %u\n",
-						ret, export->vcid_local, export->export_id);
-			} else if (ret == -EBUSY) {
-				pr_warn("exp id %u unmap fail on vcid %X, still in use. unimp msg deferred\n",
-					export->export_id, export->vcid_local);
-				habmem_defer_unimp_sent(export);
-			} else
-				pr_err("unmap failed %d on vcid %X, exp id %u\n",
-					ret, export->vcid_local, export->export_id);
+		if (export->pchan->mem_proto == 0U) {
+			kfree(exp_super);
+			continue;
 		}
+
+		if (ret == 0) {
+			/*
+			 * even if imp_hyp_unmap return success, it is still an unexpected
+			 * scenario: HAB client exits/crashes/gets killed before unimport
+			 * all imported memory.
+			 */
+			pr_debug("unimp msg sent for exp id %u on %s\n",
+				export->export_id, export->pchan->name);
+			HAB_HEADER_SET_TYPE(header, HAB_PAYLOAD_TYPE_UNIMPORT);
+			HAB_HEADER_SET_SIZE(header, sizeof(uint32_t));
+			HAB_HEADER_SET_ID(header, HAB_VCID_UNIMPORT);
+			HAB_HEADER_SET_SESSION_ID(header, HAB_SESSIONID_UNIMPORT);
+			ret = physical_channel_send(export->pchan, &header, &export->export_id);
+			if ((ret != 0) && (ret != -ENODEV))
+				pr_err("failed to send unimp msg %d, vcid %X, exp id %u\n",
+					ret, export->vcid_local, export->export_id);
+			else
+				pr_debug("unimp msg send ret %d, vcid %x, expid %u, pchan rmt closed %d\n",
+					ret, export->vcid_local, export->export_id,
+					export->pchan->otherend_closed);
+		} else if (ret == -EBUSY) {
+			pr_warn("exp id %u unmap fail on vcid %X, still in use. unimp msg deferred\n",
+				export->export_id, export->vcid_local);
+			habmem_defer_unimp_sent(export);
+		} else
+			pr_err("unmap failed %d on vcid %X, exp id %u\n",
+				ret, export->vcid_local, export->export_id);
+
 		kfree(exp_super);
 	}
 	spin_unlock_bh(&ctx->imp_lock);
