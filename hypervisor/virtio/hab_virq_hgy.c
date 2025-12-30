@@ -123,7 +123,7 @@ int habhyp_virq_send(struct hvirq_dbl *dbl)
 	int ret = 0;
 	gh_dbl_flags_t dbl_mask = DDUMP_DBL_MASK;
 
-	ret = gh_dbl_send(dbl->tx_dbl, &dbl_mask, 0);
+	ret = gh_dbl_send(dbl->tx_dbl, &dbl_mask, GH_DBL_NONBLOCK);
 	return ret;
 }
 
