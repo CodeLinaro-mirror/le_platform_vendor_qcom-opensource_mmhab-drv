@@ -70,6 +70,7 @@ struct vhost_hab_pchannel { /* per pchan */
 	struct vhost_work tx_recv_work;
 
 	struct list_head send_list; /* list of node to be sent to rxq */
+	uint64_t send_list_entry_cnt;
 	struct mutex send_list_mutex; /* protect send_list */
 	struct vhost_work rx_send_work;
 
@@ -1003,6 +1004,7 @@ static void rx_worker(struct vhost_hab_pchannel *vh_pchan)
 
 			mutex_lock(&vh_pchan->send_list_mutex);
 			list_del(&send_node->node);
+			vh_pchan->send_list_entry_cnt--;
 			mutex_unlock(&vh_pchan->send_list_mutex);
 			kfree(send_node); /* send OK process more */
 			trace_hab_rxworker_send_one(vh_pchan->pchan);
@@ -1064,6 +1066,7 @@ int physical_channel_send(struct physical_channel *pchan,
 
 	mutex_lock(&vh_pchan->send_list_mutex);
 	list_add_tail(&send_node->node, &vh_pchan->send_list);
+	vh_pchan->send_list_entry_cnt++;
 	mutex_unlock(&vh_pchan->send_list_mutex);
 
 	trace_hab_pchan_send_done(pchan);
@@ -1371,9 +1374,9 @@ int hab_stat_log(struct physical_channel **pchans, int pchan_cnt, char *dest,
 			continue;
 		}
 		ret = hab_stat_buffer_print(dest, dest_size,
-				"mmid %d: vq empty tx %d rx %d\n",
+				"mmid %d: vq empty tx %d rx %d tx_pending %llu\n",
 				vh_pchan->habdev->id, vh_pchan->tx_empty,
-				vh_pchan->rx_empty);
+				vh_pchan->rx_empty, vh_pchan->send_list_entry_cnt);
 		if (ret != 0)
 			break;
 	}
