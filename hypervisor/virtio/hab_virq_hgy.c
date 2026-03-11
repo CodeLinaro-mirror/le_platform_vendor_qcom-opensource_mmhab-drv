@@ -15,15 +15,18 @@
 #define GH_HYP_IRQ2 0x6
 #define GH_HYP_IRQ3 0x7
 #define GH_HYP_IRQ4 0x8
-#define GH_HYP_IRQ5 0x9
+
+/* Used for testing purpose */
+#define GH_HYP_IRQ5 0x4
+
 #define GH_HYP_IRQ6 0xA
 
 static struct virq_handle virqid[] = {
 	{ VIRQ_DISP1, GH_HYP_IRQ1, VIRQ_1},
 	{ VIRQ_DISP2, GH_HYP_IRQ2, VIRQ_2},
-	{ VIRQ_GFX, GH_HYP_IRQ3, VIRQ_3},
-	{ VIRQ_MISC, GH_HYP_IRQ4, VIRQ_4},
-	{ VIRQ_VID, GH_HYP_IRQ5, VIRQ_5},
+	{ VIRQ_DPRX1, GH_HYP_IRQ3, VIRQ_3},
+	{ VIRQ_DPRX2, GH_HYP_IRQ4, VIRQ_4},
+	{ VIRQ_MISC, GH_HYP_IRQ5, VIRQ_5},
 	{ VIRQ_AUD, GH_HYP_IRQ6, VIRQ_6},
 };
 
