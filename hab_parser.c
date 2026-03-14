@@ -7,7 +7,7 @@
 #include "hab_virq.h"
 #include <linux/of.h>
 
-struct local_virq virqsettings = {0};
+struct local_virq virqsettings[HABCFG_VMID_MAX] = {0};
 /*
  * set valid mmid value in tbl to show this is valid entry. All inputs here are
  * normalized to 1 based integer
@@ -74,9 +74,12 @@ static int hab_parse_dt(struct local_vmid *settings)
 	int result, i;
 	struct device_node *hab_node = NULL;
 	struct device_node *mmid_grp_node = NULL;
+	struct device_node *virq_node = NULL;
+	struct device_node *virqgrp = NULL;
 	const char *role = NULL;
-	int tmp = -1, vmids_num, count = 0;
+	int tmp = -1, vmids_num, virq_count = 0;
 	u32 vmids[16];
+	int vmid_index = 0;
 	int32_t grp_start_id, be;
 
 	/* parse device tree*/
@@ -97,26 +100,75 @@ static int hab_parse_dt(struct local_vmid *settings)
 	pr_debug("local vmid = %d\n", tmp);
 	settings->self = tmp;
 
-	if (of_find_property(hab_node, HAB_VIRQ_NODE, NULL)) {
-		count = of_property_count_elems_of_size(hab_node, HAB_VIRQ_NODE,
-				sizeof(u32));
-		if (count == 0)
-			pr_err("No virt-irq are specified for %s\n", HAB_VIRQ_NODE);
-		else if (count > HAB_VIRTIRQ_MAX)
-			pr_err("The number of virq exceed limitation set %d for %s\n",
-					HAB_VIRTIRQ_MAX, HAB_VIRQ_NODE);
+	virqgrp = of_get_child_by_name(hab_node, "virqgrp");
+	if (!virqgrp) {
+		pr_warn("missing 'virqgrp' container\n");
+	} else {
+		for_each_child_of_node(virqgrp, virq_node) {
 
-		result = of_property_read_u32_array(hab_node, HAB_VIRQ_NODE,
-				virqsettings.label, count);
-		if (result != 0)
-			pr_err("error %d getting virq resource for %s\n", result,
-					HAB_VIRQ_NODE);
+			const char *name = virq_node->name;
+
+			result = of_property_read_u32(virq_node,
+					"index", &tmp);
+			if (result != 0) {
+				pr_err("failed to read index, result = %d\n",
+						result);
+			}
+			vmid_index = tmp;
+
+			/* check to ensure that only 2 vmids
+			 * supported 2 and 3 and corresponds to 0 and 1 index
+			 * anything else is casuing corruption if virqsettings
+			 * structure.
+			 */
+			if (vmid_index < 0 || vmid_index > 1) {
+				pr_err("failed to read local valid index = %d\n", vmid_index);
+				return -EINVAL;
+			}
+
+			virq_count = of_property_count_elems_of_size(virq_node,
+					"label", (int)sizeof(u32));
+			if (virq_count <= 0) {
+				pr_err("No virt-irq are specified\n");
+				virq_count = 0;
+			} else if (virq_count > HAB_VIRTIRQ_MAX) {
+				pr_err("The number of virq exceed limitation set %d\n",
+						HAB_VIRTIRQ_MAX);
+				virq_count = HAB_VIRTIRQ_MAX;
+			}
+
+			result = of_property_read_u32_array(virq_node,
+					"label", virqsettings[vmid_index].label,
+					(size_t)virq_count);
+			if (result != 0)
+				pr_err("error %d getting virq resource\n", result);
+
+			for (i = 0 ; i < virq_count ; i++)
+				pr_info("virq-label is %d\n",
+						virqsettings[vmid_index].label[i]);
+
+			result = of_property_read_u32(virq_node,
+					"remote-vmids", &tmp);
+			if (result != 0) {
+				pr_err("failed to read remote-vmids, result = %d\n",
+						result);
+				return result;
+			}
+
+			virqsettings[vmid_index].vmid = tmp;
+			virqsettings[vmid_index].cnt_virq = virq_count;
+			pr_debug("virq name %s vmid_index %d virq count %d remote vmid %d\n",
+					name, vmid_index, virqsettings[vmid_index].cnt_virq,
+					virqsettings[vmid_index].vmid);
+			for (int j = 0 ; j < virqsettings[vmid_index].cnt_virq ; j++) {
+				pr_info("virq-label is %d vmid %d at vm_index %d\n",
+						virqsettings[vmid_index].label[j],
+						virqsettings[vmid_index].vmid,
+						vmid_index);
+			}
+		}
+		of_node_put(virqgrp);
 	}
-
-	virqsettings.cnt_virq = count;
-
-	for (int i = 0 ; i < count ; i++)
-		pr_debug("virq-label is %d\n", virqsettings.label[i]);
 
 	if (of_find_property(hab_node, "PCHAN_RX_PENDING_SZ_MAX", NULL)) {
 		result = of_property_read_u32(hab_node, "RX_PENDING_SZ_MAX", &tmp);
