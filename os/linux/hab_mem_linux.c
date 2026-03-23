@@ -578,6 +578,8 @@ static int habmem_add_export_compress(struct virtual_channel *vchan,
 		ret = -ENOMEM;
 		goto err_add_exp;
 	}
+	export = &exp_super->exp;
+	export->payload_count = (int)page_count;
 	platform_data = kzalloc(
 			sizeof(struct exp_platform_data),
 			GFP_KERNEL);
@@ -586,8 +588,6 @@ static int habmem_add_export_compress(struct virtual_channel *vchan,
 		goto err_alloc;
 	}
 
-	export = &exp_super->exp;
-	export->payload_count = (int)page_count;
 	platform_data->dmabuf = buf;
 	exp_super->offset = offset;
 	exp_super->platform_data = (void *)platform_data;
