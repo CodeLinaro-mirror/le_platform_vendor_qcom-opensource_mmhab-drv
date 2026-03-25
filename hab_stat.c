@@ -404,10 +404,9 @@ int dump_hab_open(void)
 	(void)strlcat(file_path, HAB_PIPE_DUMP_FILE_EXT, sizeof(file_path));
 
 	filp = vmalloc((uint32_t)HAB_PIPEDUMP_SIZE);
-	if (IS_ERR(filp)) {
-		rc = (int)PTR_ERR(filp);
+	if (filp == NULL) {
+		rc = -ENOMEM;
 		pr_err("failed to create pipe dump buffer rc %d\n", rc);
-		filp = NULL;
 	} else {
 		pr_info("hab pipe dump buffer opened %s\n", file_path);
 		pipedump_idx = 0;

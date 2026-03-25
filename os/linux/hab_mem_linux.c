@@ -533,13 +533,8 @@ static int habmem_compress_pfns(
 
 	return 0;
 err:
-	if (!IS_ERR_OR_NULL(attach)) {
-		if (!IS_ERR_OR_NULL(sg_table))
-			dma_buf_unmap_attachment(attach,
-					sg_table,
-					DMA_TO_DEVICE);
+	if (!IS_ERR_OR_NULL(attach))
 		dma_buf_detach(dmabuf, attach);
-	}
 
 	return ret;
 }
