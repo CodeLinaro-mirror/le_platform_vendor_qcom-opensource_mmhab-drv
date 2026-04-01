@@ -1,0 +1,19 @@
+Source: msmhab
+Section: devel
+Priority: optional
+Maintainer: leiwang <leiwan@qti.qualcomm.com>
+Build-Depends:  debhelper-compat (= 13), linux-qcom-source, gunyah-drivers-dev
+Standards-Version: 4.6.0
+Homepage: 
+
+Package: msmhab
+Architecture: arm64
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: QCOM OOT UMD related kernel modules
+
+Package: msmhab-dev
+Architecture: arm64
+Section: libdevel
+Depends: ${misc:Depends}, msmhab(= ${binary:Version})
+Description: hab kernel drivers
+
