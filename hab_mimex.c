@@ -237,7 +237,7 @@ static int habmem_export_vchan(struct uhab_context *ctx,
 		uint32_t flags,
 		uint32_t export_id)
 {
-	int ret;
+	int ret = 0;
 	struct export_desc *export = NULL;
 	struct export_desc_super *exp_super = NULL;
 	uint32_t sizebytes = (uint32_t)sizeof(*export) + payload_size;
