@@ -1,0 +1,2 @@
+lib/modules/*/extra/msm_hab.ko
+usr/lib/modules-load.d/msmhab.conf

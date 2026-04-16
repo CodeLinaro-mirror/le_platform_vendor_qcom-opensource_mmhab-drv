@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0
 
-HAB_ROOT=$(PWD)
+HAB_ROOT=$(M)
 
 INSTALL_HDR=$(shell mkdir -p $(HDR_INSTAL_PATH)/linux; \
  			 cd $(KERNEL_SRC);  \
@@ -13,13 +13,13 @@ INSTALL_HDR=$(shell mkdir -p $(HDR_INSTAL_PATH)/linux; \
 all: clean modules
 
 modules:
-	$(MAKE) -C "$(KERNEL_SRC)" "M=$(HAB_ROOT)" modules
+	$(MAKE) -C "$(KERNEL_SRC)" "M=$(M)" modules
 
 modules_install:
-	$(MAKE) -C "$(KERNEL_SRC)" "M=$(HAB_ROOT)" modules_install
+	$(MAKE) -C "$(KERNEL_SRC)" "M=$(M)" modules_install
 
 clean:
-	$(MAKE) -C "$(KERNEL_SRC)" "M=$(HAB_ROOT)" clean
+	$(MAKE) -C "$(KERNEL_SRC)" "M=$(M)" clean
 
 headers_install:
 	@echo "header installing $(INSTALL_HDR)"

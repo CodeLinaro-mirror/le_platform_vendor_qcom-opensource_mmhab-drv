@@ -1,0 +1,27 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@
+
+export KDIR := /usr/src/kernel
+export KERNEL_SRC := /usr/src/kernel
+export M := $(CURDIR)
+
+export KBUILD_MODPOST_WARN = 1
+
+override_dh_auto_build:
+	$(MAKE) -C $(KERNEL_SRC) M=$(M) modules KCFLAGS+="-DMODULE -I$(KERNEL_SRC)/include  -I$(KERNEL_SRC)/arch/arm64/include -I$(KERNEL_SRC)/arch/arm64/include/uapi -I$(KERNEL_SRC)/include/uapi -I/usr/include"
+
+
+override_dh_auto_install:
+	dh_auto_install --destdir=$(CURDIR)/debian/tmp
+	$(MAKE) -C $(KERNEL_SRC) M=$(CURDIR) INSTALL_MOD_PATH=$(CURDIR)/debian/tmp INSTALL_MOD_DIR=extra  modules_install
+	install -d $(CURDIR)/debian/tmp/usr/lib/modules-load.d
+	install -m 0644 msmhab.conf $(CURDIR)/debian/tmp/usr/lib/modules-load.d/msmhab.conf
+	install -d $(CURDIR)/debian/tmp/usr/include/linux
+	install -m 0644 include/uapi/linux/hab_ioctl.h $(CURDIR)/debian/tmp/usr/include/linux/hab_ioctl.h
+	install -m 0644 include/uapi/linux/habmmid.h $(CURDIR)/debian/tmp/usr/include/linux/habmmid.h
+
+.PHONY: clean
+clean:
+	dh_clean
