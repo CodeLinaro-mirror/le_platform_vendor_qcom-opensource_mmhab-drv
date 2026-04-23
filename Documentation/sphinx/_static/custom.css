@@ -1,0 +1,7 @@
+/* Hide only the top-level docinfo field list rendered from :tocdepth:. */
+section#mmhab-public-api-reference-manual > dl.field-list.simple,
+section#khab-public-api-reference > dl.field-list.simple,
+.wy-nav-content section#mmhab-public-api-reference-manual > dl.field-list.simple,
+.wy-nav-content section#khab-public-api-reference > dl.field-list.simple {
+	display: none !important;
+}
