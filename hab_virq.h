@@ -26,6 +26,7 @@ struct hvirq_dbl {
 	int id;
 	struct kref refcount;
 	int virq_registered;
+	int close_entry;
 	int virtirq_label;
 	int virtirq_num;
 
@@ -67,7 +68,6 @@ int hab_virq_register(struct virq_uhab_context *ctx, int32_t *virq_handle, unsig
 		unsigned int virq_num, virq_rx_cb_t rx_cb, void *priv, unsigned int flags);
 int hab_virq_send(struct virq_uhab_context *ctx, int32_t virq_handle, unsigned int flags);
 int hab_virq_unregister(struct virq_uhab_context *ctx, int32_t virq_handle, unsigned int flags);
-struct hvirq_dbl *hab_virq_get_fromId(struct virq_uhab_context *ctx, int32_t id);
 void hab_virq_put(struct hvirq_dbl *dbl);
 
 struct virq_uhab_context *virq_hab_ctx_alloc(int kernel);
