@@ -554,7 +554,7 @@ static int hab_init_done_msg_wait(struct uhab_context *ctx,
 	ret = hab_open_listen(ctx, dev, request, recv_request,
 		HAB_HS_TIMEOUT);
 	(void)hab_open_pending_exit(ctx, vchan->pchan, pending_open);
-	if ((ret != 0) && (*recv_request != NULL) &&
+	if ((ret == 0) && (*recv_request != NULL) &&
 		(*recv_request)->type == HAB_PAYLOAD_TYPE_INIT_CANCEL) {
 		pr_err("listen cancelled vcid %x subid %d openid %d ret %d\n",
 			request->xdata.vchan_id, request->xdata.sub_id,

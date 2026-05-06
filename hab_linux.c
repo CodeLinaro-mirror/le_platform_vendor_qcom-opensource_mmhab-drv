@@ -197,12 +197,7 @@ static long hab_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 				recv_param->flags);
 
 		if (msg != NULL) {
-			if (ret == 0)
-				ret = hab_copy_data(msg, recv_param);
-			else
-				pr_warn("vcid %X recv failed %d and msg is still of %zd bytes\n",
-					recv_param->vcid, (int)ret, msg->sizebytes);
-
+			ret = hab_copy_data(msg, recv_param);
 			hab_msg_free(msg);
 		}
 
@@ -556,11 +551,9 @@ static int __init hab_init(void)
 	return result;
 
 exit:
-	if (hab_driver.cdev != NULL)
-		kfree(hab_driver.cdev);
-        if (hab_driver.dev != NULL)
-		kfree(hab_driver.dev);
-        unregister_chrdev_region(hab_driver.major, CDEV_NUM_MAX);
+	kfree(hab_driver.cdev);
+	kfree(hab_driver.dev);
+	unregister_chrdev_region(hab_driver.major, CDEV_NUM_MAX);
 	pr_err("Error in hab init, result %d\n", result);
 	return result;
 }

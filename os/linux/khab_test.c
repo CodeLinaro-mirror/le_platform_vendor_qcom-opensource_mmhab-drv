@@ -96,16 +96,21 @@ static ssize_t expimp_store(struct kobject *kobj, struct kobj_attribute *attr,
 	if (strnlen(str, strlen("dump_pipe")) == strlen("dump_pipe") &&
 		strcmp(str, "dump_pipe") == 0) {
 		/* string terminator is ignored */
+		spin_lock_bh(&hab_driver.drvlock);
 		list_for_each_entry(ctx, &hab_driver.uctx_list, node) {
 			if (ctx->owner == pid_stat) {
-				vchan = list_first_entry(&ctx->vchannels,
+				read_lock(&ctx->ctx_lock);
+				vchan = list_first_entry_or_null(&ctx->vchannels,
 					struct virtual_channel, node);
 				if (vchan != NULL) {
 					dump_hab_wq(vchan->pchan); /* user context */
+					read_unlock(&ctx->ctx_lock);
 					break;
 				}
+				read_unlock(&ctx->ctx_lock);
 			}
 		}
+		spin_unlock_bh(&hab_driver.drvlock);
 		return (ssize_t)count;
 	}
 
