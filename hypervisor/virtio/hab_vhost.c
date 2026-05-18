@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022, 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 #include <linux/compat.h>
 #include <linux/eventfd.h>
@@ -908,45 +908,39 @@ static int rx_send_one_node_locked(struct vhost_dev *dev,
 			break;
 		}
 
+		/* in_len > 0 guaranteed at this point */
 		total_len += in_len + out_len;
 		size_filled = 0;
 
-		if (in_len != 0U) {
-			if (HAB_HEADER_GET_TYPE(send_node->header) ==
-				HAB_PAYLOAD_TYPE_PROFILE) {
-				struct habmm_xing_vm_stat *pstat =
-					(struct habmm_xing_vm_stat *)
-					(send_node->payload);
-				struct timespec64 ts = {0};
+		if (HAB_HEADER_GET_TYPE(send_node->header) ==
+			HAB_PAYLOAD_TYPE_PROFILE) {
+			struct habmm_xing_vm_stat *pstat =
+				(struct habmm_xing_vm_stat *)
+				(send_node->payload);
+			struct timespec64 ts = {0};
 
-				ktime_get_ts64(&ts);
-				pstat->tx_sec = (uint64_t)ts.tv_sec;
-				tx_usec_tmp = ts.tv_nsec/NSEC_PER_USEC;
-				pstat->tx_usec = (uint64_t)tx_usec_tmp;
-			}
+			ktime_get_ts64(&ts);
+			pstat->tx_sec = (uint64_t)ts.tv_sec;
+			tx_usec_tmp = ts.tv_nsec/NSEC_PER_USEC;
+			pstat->tx_usec = (uint64_t)tx_usec_tmp;
+		}
 
-			header->sequence = ++vh_pchan->pchan->sequence_tx;
-			header->signature = HAB_HEAD_SIGNATURE;
+		header->sequence = ++vh_pchan->pchan->sequence_tx;
+		header->signature = HAB_HEAD_SIGNATURE;
 
-			ret = fill_rx_buf((void **)(&data),
-					&remain_size,
-					&in_iter, in_len, &size_filled);
-			if (ret != 0)
-				break;
+		ret = fill_rx_buf((void **)(&data),
+				&remain_size,
+				&in_iter, in_len, &size_filled);
+		if (ret != 0)
+			break;
 
-			ret = vhost_add_used(vq, (uint32_t)head, (int32_t)size_filled);
-			if (ret != 0) {
-				pr_err("%s failed to add used ret %d head %d size %d\n",
-					vh_pchan->pchan->name, ret, head, size_filled);
-				break;
-			}
-			*added += 1; /* continue for the remaining */
-		} else {
-			pr_err("%s rx-buf empty ret %d inlen %d outlen %d head %d\n",
-				vh_pchan->pchan->name, ret, in_len, out_len, head);
-			ret = -EPIPE;
+		ret = vhost_add_used(vq, (uint32_t)head, (int32_t)size_filled);
+		if (ret != 0) {
+			pr_err("%s failed to add used ret %d head %d size %d\n",
+				vh_pchan->pchan->name, ret, head, size_filled);
 			break;
 		}
+		*added += 1; /* continue for the remaining */
 
 		if (unlikely(vhost_exceeds_weight(vq, 0, total_len))) {
 			pr_err("total_len %lu > hab vq weight %d\n",
