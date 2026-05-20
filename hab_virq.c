@@ -58,6 +58,7 @@ int hab_virq_alloc(int i, int vmid_remote, int label, int irq, void __iomem *bas
 	} else {
 		dbl->dom_id = vmid_remote;
 		dbl->virq_registered = 0;
+		dbl->close_entry = 0;
 		dbl->virtirq_label = label;
 		dbl->irq = irq;
 		dbl->base = base;
@@ -76,6 +77,9 @@ int hab_virq_dealloc(int i, int vmid_remote)
 
 	dbl = g_virtirq_dev[i][vmid_remote].dbl;
 	if (dbl != NULL) {
+		spin_lock(&dbl->dbl_lock);
+		dbl->close_entry = 1;
+		spin_unlock(&dbl->dbl_lock);
 		pr_info("dealloc dbl id %d lbl %d dom_id %d\n", dbl->id,
 				dbl->virtirq_label, dbl->dom_id);
 		hab_virq_put(dbl);
@@ -92,13 +96,24 @@ static void hab_virq_free(struct kref *ref)
 	kfree(dbl);
 }
 
-struct hvirq_dbl *hab_virq_get_fromid(struct virq_uhab_context *ctx, int32_t id)
+static struct hvirq_dbl *hab_virq_get_fromid(struct virq_uhab_context *ctx,
+		int32_t id, int allow_close_entry)
 {
 	struct hvirq_dbl *dbl;
+	int close_entry = 0;
 
 	read_lock(&ctx->ctx_lock);
 	list_for_each_entry(dbl, &ctx->virq, node) {
 		if ((dbl->id == id) && (kref_get_unless_zero(&dbl->refcount) != 0)) {
+			if (allow_close_entry == 0) {
+				spin_lock(&dbl->dbl_lock);
+				close_entry = dbl->close_entry;
+				spin_unlock(&dbl->dbl_lock);
+				if (close_entry != 0) {
+					hab_virq_put(dbl);
+					continue;
+				}
+			}
 			read_unlock(&ctx->ctx_lock);
 			return dbl;
 		}
@@ -217,15 +232,20 @@ int hab_virq_register(struct virq_uhab_context *ctx, int32_t *virq_handle, unsig
 	}
 
 	dbl->virq_registered = 1;
+	dbl->close_entry = 0;
 	dbl->flags = flags;
 	virq_hab_ctx_get(ctx);
+
+	/*
+	 * Keep one ref while dbl is linked on ctx->virq.
+	 * It is dropped in unregister/release after list_del().
+	 */
 	write_lock(&ctx->ctx_lock);
 	list_add_tail(&dbl->node, &ctx->virq);
 	ctx->virq_total++;
 	write_unlock(&ctx->ctx_lock);
 
 	*virq_handle = dbl->id;
-	hab_virq_put(dbl);
 	return ret;
 }
 
@@ -235,7 +255,7 @@ int hab_virq_send(struct virq_uhab_context *ctx,
 	struct hvirq_dbl *dbl;
 	int ret;
 
-	dbl = hab_virq_get_fromid(ctx, virq_handle);
+	dbl = hab_virq_get_fromid(ctx, virq_handle, 0);
 	if (dbl == NULL) {
 		pr_err("dbl device not found for id %d\n", virq_handle);
 		return -ENODEV;
@@ -263,7 +283,7 @@ int hab_virq_unregister(struct virq_uhab_context *ctx,
 	int ret = 0;
 	struct hvirq_dbl *dbl = NULL;
 
-	dbl = hab_virq_get_fromid(ctx, virq_handle);
+	dbl = hab_virq_get_fromid(ctx, virq_handle, 1);
 	if (dbl == NULL) {
 		pr_err("unregister fail, cannot find dbl id %d\n", virq_handle);
 		return -EINVAL;
@@ -305,6 +325,9 @@ int hab_virq_unregister(struct virq_uhab_context *ctx,
 	list_del(&dbl->node);
 	ctx->virq_total--;
 	write_unlock(&ctx->ctx_lock);
+	/* Drop the temporary ref acquired by hab_virq_get_fromid(). */
+	hab_virq_put(dbl);
+	/* Drop the persistent ref owned by ctx->virq list membership. */
 	hab_virq_put(dbl);
 	virq_hab_ctx_put(ctx);
 	return ret;
