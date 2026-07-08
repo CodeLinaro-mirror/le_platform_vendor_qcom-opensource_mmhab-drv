@@ -53,9 +53,6 @@ int hab_stat_show_vchan(struct hab_driver *driver,
 
 		read_lock_bh(&dev->pchan_lock);
 		list_for_each_entry(pchan, &dev->pchannels, node) {
-			if (pchan->vcnt == 0)
-				continue;
-
 			ret = hab_stat_buffer_print(buf, size,
 				"nm %s r %d lc %d rm %d sq_t %d sq_r %d st 0x%x vn %d ",
 				pchan->name, pchan->is_be, pchan->vmid_local,
