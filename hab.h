@@ -606,6 +606,7 @@ struct export_desc_super {
 	uint32_t remote_imported;
 
 	HAB_RB_ENTRY node;
+	struct list_head cleanup_node; /* used only during hab_ctx_free drain */
 
 	/*
 	 * exp must be the last member
