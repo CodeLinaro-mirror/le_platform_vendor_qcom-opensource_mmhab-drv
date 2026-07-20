@@ -13,6 +13,7 @@
 #define VIRQ_4 4
 #define VIRQ_5 5
 #define VIRQ_6 6
+#define VIRQ_7 7
 
 #define HAB_VIRTIRQ_MAX  (VIRQ_MAX/1000)
 
@@ -51,14 +52,16 @@ struct virq_handle {
 	int virq_num;
 	int virq_label;
 	uint32_t id;
+	int vmid;
 };
 
 struct local_virq {
 	int32_t label[HAB_VIRTIRQ_MAX];
 	int32_t cnt_virq;
+	int vmid;
 };
 
-extern struct local_virq virqsettings;
+extern struct local_virq virqsettings[HABCFG_VMID_MAX];
 
 int hab_create_virq_cdev_node(int index);
 
@@ -91,5 +94,5 @@ int habhyp_virq_rx_register(struct hvirq_dbl *dbl, int dbl_label);
 int habhyp_virq_send(struct hvirq_dbl *dbl);
 int habhyp_virq_tx_unregister(struct hvirq_dbl *dbl);
 int habhyp_virq_rx_unregister(struct hvirq_dbl *dbl);
-int habhyp_get_virq_num_id(void **virqdev, int label);
+int habhyp_get_virq_num_id(void **virqdev, int label, int vmid);
 #endif

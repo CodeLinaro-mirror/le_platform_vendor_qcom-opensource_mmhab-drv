@@ -1224,14 +1224,19 @@ static int hab_dealloc_virtirq(struct local_vmid *settings)
 {
 	int i, j, ret = 0;
 
+	int vmid_index = 0;
 	/* scan by valid VMs, then virtirq */
 	for (i = 0; i < HABCFG_VMID_MAX; i++) {
 		if (HABCFG_GET_VMID(settings, i) != HABCFG_VMID_INVALID &&
 				HABCFG_GET_VMID(settings, i) != settings->self) {
-			pr_debug("dealloc virtirq for vm %d\n", i);
+			if (virqsettings[vmid_index].vmid == HABCFG_GET_VMID(settings, i)) {
+				pr_info("dealloc virtirq for vm %d cnt %d\n", i,
+						virqsettings[vmid_index].cnt_virq);
 
-			for (j = 0; j < virqsettings.cnt_virq; j++)
-				ret = hab_virq_dealloc(j, i);
+				for (j = 0; j < virqsettings[i].cnt_virq; j++)
+					ret = hab_virq_dealloc(j, virqsettings[i].vmid);
+				vmid_index++;
+			}
 		}
 	}
 	return ret;
@@ -1243,15 +1248,21 @@ static int hab_dealloc_virtirq(struct local_vmid *settings)
 static int hab_generate_virtirq(struct local_vmid *settings)
 {
 	int i, j, ret = 0;
+	int vmid_index = 0;
 
 	/* scan by valid VMs, then virtirq */
 	for (i = 0; i < HABCFG_VMID_MAX; i++) {
 		if (HABCFG_GET_VMID(settings, i) != HABCFG_VMID_INVALID &&
 				HABCFG_GET_VMID(settings, i) != settings->self) {
-			pr_debug("create virtirq for vm %d\n", i);
+			if (virqsettings[vmid_index].vmid == HABCFG_GET_VMID(settings, i)) {
+				pr_debug("create virtirq for vm %d cnt %d\n", i,
+						virqsettings[vmid_index].cnt_virq);
 
-			for (j = 0; j < virqsettings.cnt_virq; j++)
-				ret = hab_virq_alloc(j, i, virqsettings.label[j], 0, NULL);
+				for (j = 0; j < virqsettings[vmid_index].cnt_virq; j++)
+					ret = hab_virq_alloc(j, virqsettings[vmid_index].vmid,
+							virqsettings[vmid_index].label[j], 0, NULL);
+				vmid_index++;
+			}
 		}
 	}
 	return ret;
