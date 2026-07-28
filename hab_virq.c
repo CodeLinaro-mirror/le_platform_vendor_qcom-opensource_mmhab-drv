@@ -42,12 +42,15 @@ int habhyp_get_virq_num_id(void **virqdev, int label)
 	return -EOPNOTSUPP;
 }
 #endif
-int hab_virq_alloc(int i, int vmid_remote, int label, int irq, void __iomem *base)
+int hab_virq_alloc(int virq_index, int vmid_remote,
+		int label, int irq, void __iomem *base)
 {
 	struct hvirq_dbl *dbl = NULL;
 	int ret = 0;
 
-	ret = habhyp_get_virq_num_id((void **)&dbl, label);
+	pr_debug("alloc index %d dom_id %d lbl %d\n",
+			virq_index, vmid_remote, label);
+	ret = habhyp_get_virq_num_id((void **)&dbl, label, vmid_remote);
 	if (ret != 0) {
 		if (ret == -EOPNOTSUPP) {
 			pr_err("resume with hab insmod\n");
@@ -64,7 +67,7 @@ int hab_virq_alloc(int i, int vmid_remote, int label, int irq, void __iomem *bas
 		dbl->base = base;
 		dbl->client_cb = NULL;
 		dbl->efd = NULL;
-		g_virtirq_dev[i][vmid_remote].dbl = dbl;
+		g_virtirq_dev[virq_index][vmid_remote].dbl = dbl;
 		pr_info("alloc dbl id %d dom_id %d lbl %d\n",
 				dbl->id, dbl->dom_id, dbl->virtirq_label);
 	}
@@ -262,8 +265,13 @@ int hab_virq_send(struct virq_uhab_context *ctx,
 	}
 
 	ret = habhyp_virq_send(dbl);
-	if (ret) {
-		pr_err("failed to raise virq to the sender dbl id %d ret %d\n", virq_handle, ret);
+	if (ret == -EAGAIN) {
+		ret = -ENODEV;
+		pr_err("remote closed during virq send ret %d\n", ret);
+		hab_virq_put(dbl);
+		return ret;
+	} else if (ret) {
+		pr_err("failed to send virq id %d ret %d\n", virq_handle, ret);
 		hab_virq_put(dbl);
 		return ret;
 	}

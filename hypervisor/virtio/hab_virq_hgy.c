@@ -11,26 +11,28 @@
 /* These values are configured in device tree of HAB
  * under virt-irq option
  */
-#define GH_HYP_IRQ1 0x5
-#define GH_HYP_IRQ2 0x6
-#define GH_HYP_IRQ3 0x7
-#define GH_HYP_IRQ4 0x8
+#define GH_HYP_IRQ1 0x9
+#define GH_HYP_IRQ2 0x5
+#define GH_HYP_IRQ3 0x6
+#define GH_HYP_IRQ4 0xC
+#define GH_HYP_IRQ5 0xD
+#define GH_HYP_IRQ6 0xE
+#define GH_HYP_IRQ7 0xF
 
-/* Used for testing purpose */
-#define GH_HYP_IRQ5 0x4
-
-#define GH_HYP_IRQ6 0xA
+#define VMID_LAGVM 2
+#define VMID_LVGVM 3
 
 static struct virq_handle virqid[] = {
-	{ VIRQ_DISP1, GH_HYP_IRQ1, VIRQ_1},
-	{ VIRQ_DISP2, GH_HYP_IRQ2, VIRQ_2},
-	{ VIRQ_DPRX1, GH_HYP_IRQ3, VIRQ_3},
-	{ VIRQ_DPRX2, GH_HYP_IRQ4, VIRQ_4},
-	{ VIRQ_MISC, GH_HYP_IRQ5, VIRQ_5},
-	{ VIRQ_AUD, GH_HYP_IRQ6, VIRQ_6},
+	{ VIRQ_MISC, GH_HYP_IRQ1, VIRQ_1, VMID_LAGVM},
+	{ VIRQ_DISP1, GH_HYP_IRQ2, VIRQ_2, VMID_LAGVM},
+	{ VIRQ_DISP2, GH_HYP_IRQ3, VIRQ_3, VMID_LAGVM},
+	{ VIRQ_DPRX, GH_HYP_IRQ4, VIRQ_4, VMID_LAGVM},
+	{ VIRQ_DISP1, GH_HYP_IRQ5, VIRQ_5, VMID_LVGVM},
+	{ VIRQ_DISP2, GH_HYP_IRQ6, VIRQ_6, VMID_LVGVM},
+	{ VIRQ_DPRX, GH_HYP_IRQ7, VIRQ_7, VMID_LVGVM},
 };
 
-int habhyp_get_virq_num_id(void **virqdev, int label)
+int habhyp_get_virq_num_id(void **virqdev, int label, int vmid)
 {
 	int i = 0;
 	struct hvirq_dbl *dbl;
@@ -47,7 +49,7 @@ int habhyp_get_virq_num_id(void **virqdev, int label)
 	spin_lock_init(&dbl->dbl_lock);
 	kref_init(&dbl->refcount);
 	for (i = 0 ; i < ARRAY_SIZE(virqid); i++) {
-		if (label == virqid[i].virq_label) {
+		if ((label == virqid[i].virq_label) && (vmid == virqid[i].vmid)) {
 			dbl->id =  virqid[i].id;
 			dbl->virtirq_num = virqid[i].virq_num;
 			*virqdev = dbl;
