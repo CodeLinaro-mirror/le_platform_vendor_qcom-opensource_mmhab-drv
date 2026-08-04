@@ -12,8 +12,8 @@
  * under virt-irq option
  */
 #define GH_HYP_IRQ1 0x9
-#define GH_HYP_IRQ2 0x5
-#define GH_HYP_IRQ3 0x6
+#define GH_HYP_IRQ2 0xA
+#define GH_HYP_IRQ3 0xB
 #define GH_HYP_IRQ4 0xC
 #define GH_HYP_IRQ5 0xD
 #define GH_HYP_IRQ6 0xE
