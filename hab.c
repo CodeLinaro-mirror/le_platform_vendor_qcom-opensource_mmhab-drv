@@ -141,7 +141,8 @@ void hab_ctx_free(struct kref *ref)
 	struct uhab_context *ctxdel, *ctxtmp;
 	struct hab_open_node *open_node;
 	struct export_desc *export = NULL, *exp_tmp = NULL;
-	struct export_desc_super *exp_super = NULL;
+	struct export_desc_super *exp_super = NULL, *tmp_super = NULL;
+	LIST_HEAD(to_unmap);
 	struct hab_forbidden_node *forbidden = NULL, *forbidden_tmp = NULL;
 	int irqs_disabled = irqs_disabled();
 	struct hab_header header = HAB_HEADER_INITIALIZER;
@@ -186,12 +187,21 @@ void hab_ctx_free(struct kref *ref)
 	}
 	write_unlock(&ctx->exp_lock);
 
+	/*
+	 * Drain the import warehouse into a local list while holding the lock,
+	 * then process each entry without the lock so that habmm_imp_hyp_unmap
+	 * (which calls dma_buf_put and may sleep on PREEMPT_RT) runs outside
+	 * atomic context.
+	 */
 	spin_lock_bh(&ctx->imp_lock);
-	for (exp_super = hab_rb_min(&ctx->imp_whse, struct export_desc_super, node);
-	     exp_super != NULL;
-	     exp_super = hab_rb_min(&ctx->imp_whse, struct export_desc_super, node)) {
-		export = &exp_super->exp;
+	while ((exp_super = hab_rb_min(&ctx->imp_whse, struct export_desc_super, node)) != NULL) {
 		hab_rb_remove(&ctx->imp_whse, exp_super);
+		list_add_tail(&exp_super->cleanup_node, &to_unmap);
+	}
+	spin_unlock_bh(&ctx->imp_lock);
+
+	list_for_each_entry_safe(exp_super, tmp_super, &to_unmap, cleanup_node) {
+		export = &exp_super->exp;
 		ctx->import_total--;
 		pr_debug("leaked imp %d vcid %X for ctx is collected total %d\n",
 			export->export_id, export->vcid_local,
@@ -232,7 +242,6 @@ void hab_ctx_free(struct kref *ref)
 
 		kfree(exp_super);
 	}
-	spin_unlock_bh(&ctx->imp_lock);
 
 	habmem_imp_hyp_close(ctx->import_ctx, ctx->kernel);
 
@@ -1215,14 +1224,19 @@ static int hab_dealloc_virtirq(struct local_vmid *settings)
 {
 	int i, j, ret = 0;
 
+	int vmid_index = 0;
 	/* scan by valid VMs, then virtirq */
 	for (i = 0; i < HABCFG_VMID_MAX; i++) {
 		if (HABCFG_GET_VMID(settings, i) != HABCFG_VMID_INVALID &&
 				HABCFG_GET_VMID(settings, i) != settings->self) {
-			pr_debug("dealloc virtirq for vm %d\n", i);
+			if (virqsettings[vmid_index].vmid == HABCFG_GET_VMID(settings, i)) {
+				pr_info("dealloc virtirq for vm %d cnt %d\n", i,
+						virqsettings[vmid_index].cnt_virq);
 
-			for (j = 0; j < virqsettings.cnt_virq; j++)
-				ret = hab_virq_dealloc(j, i);
+				for (j = 0; j < virqsettings[i].cnt_virq; j++)
+					ret = hab_virq_dealloc(j, virqsettings[i].vmid);
+				vmid_index++;
+			}
 		}
 	}
 	return ret;
@@ -1234,15 +1248,21 @@ static int hab_dealloc_virtirq(struct local_vmid *settings)
 static int hab_generate_virtirq(struct local_vmid *settings)
 {
 	int i, j, ret = 0;
+	int vmid_index = 0;
 
 	/* scan by valid VMs, then virtirq */
 	for (i = 0; i < HABCFG_VMID_MAX; i++) {
 		if (HABCFG_GET_VMID(settings, i) != HABCFG_VMID_INVALID &&
 				HABCFG_GET_VMID(settings, i) != settings->self) {
-			pr_debug("create virtirq for vm %d\n", i);
+			if (virqsettings[vmid_index].vmid == HABCFG_GET_VMID(settings, i)) {
+				pr_debug("create virtirq for vm %d cnt %d\n", i,
+						virqsettings[vmid_index].cnt_virq);
 
-			for (j = 0; j < virqsettings.cnt_virq; j++)
-				ret = hab_virq_alloc(j, i, virqsettings.label[j], 0, NULL);
+				for (j = 0; j < virqsettings[vmid_index].cnt_virq; j++)
+					ret = hab_virq_alloc(j, virqsettings[vmid_index].vmid,
+							virqsettings[vmid_index].label[j], 0, NULL);
+				vmid_index++;
+			}
 		}
 	}
 	return ret;

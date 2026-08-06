@@ -295,29 +295,6 @@ static const struct dma_map_ops hab_dma_ops = {
 	.unmap_sg	= hab_unmap_sg,
 };
 
-static int hab_power_down_callback(
-		struct notifier_block *nfb, unsigned long action, void *data)
-{
-
-	switch (action) {
-	case SYS_DOWN:
-	case SYS_HALT:
-	case SYS_POWER_OFF:
-		pr_debug("reboot called %ld\n", action);
-		hab_hypervisor_unregister(); /* only for single VM guest */
-		break;
-	default:
-		pr_debug("unspported action: %ld\n", action);
-		break;
-	}
-	pr_debug("reboot called %ld done\n", action);
-	return NOTIFY_DONE;
-}
-
-static struct notifier_block hab_reboot_notifier = {
-	.notifier_call = hab_power_down_callback,
-};
-
 static void reclaim_cleanup(struct work_struct *reclaim_work)
 {
 	struct export_desc *export = NULL, *exp_tmp = NULL;
@@ -482,10 +459,6 @@ static int __init hab_init(void)
 		goto exit;
 	}
 
-	result = register_reboot_notifier(&hab_reboot_notifier);
-	if (result != 0)
-		pr_err("failed to register reboot notifier %d\n", result);
-
 	INIT_WORK(&hab_driver.reclaim_work, reclaim_cleanup);
 
 	/* read in hab config, then configure pchans */
@@ -575,7 +548,6 @@ static void __exit hab_exit(void)
 	}
 	class_destroy(hab_driver.class);
 	unregister_chrdev_region(hab_driver.major, CDEV_NUM_MAX);
-	(void)unregister_reboot_notifier(&hab_reboot_notifier);
 	pr_info("hab exit called\n");
 }
 
