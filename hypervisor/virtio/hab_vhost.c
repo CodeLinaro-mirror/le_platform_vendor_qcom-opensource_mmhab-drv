@@ -151,9 +151,47 @@ static char hab_area_names[HABCFG_MMID_AREA_MAX + 1][HAB_AREA_NAME_MAX] = {
 	[MM_EVA_START /100] = "eva"
 };
 
+/*
+ * Because VMIDs are finite, we use an array to make a simple dictionary.
+ * The index of the array is the HAB vmid, and the value of the array
+ * is the VMID defined by gunyah hypervisor.
+ *
+ * When the value of the array HAB_VMID_TO_GH_VMID is -1, it means that
+ * the OS ID does not have a corresponding VMID.
+ * Assumption: the valid GVM VMIDs should > 0.
+ */
+static int HAB_VMID_TO_GH_VMID[7] = {-1, -1, 52, 53, -1, -1, -1};
+
 static void rx_worker(struct vhost_hab_pchannel *vh_pchan);
 
 static void stat_worker(struct work_struct *work);
+
+int hab_vm_addr_translate(struct vm_addr_rgn_table *gvm_addr_rgn_tbl,
+                          struct vm_addr_rgn_table *pvm_addr_rgn_table, int hab_vmid,
+                          bool *output_in_pvm_addr_rgn_tbl)
+{
+	if (hab_vmid < 0 || hab_vmid >= (int)ARRAY_SIZE(HAB_VMID_TO_GH_VMID) ||
+			HAB_VMID_TO_GH_VMID[hab_vmid] == -1) {
+		pr_err("ipa translate do not support hab vmid %d\n", hab_vmid);
+		return -EINVAL;
+	}
+
+	return gh_vm_addr_translate(gvm_addr_rgn_tbl, pvm_addr_rgn_table,
+			HAB_VMID_TO_GH_VMID[hab_vmid], output_in_pvm_addr_rgn_tbl);
+}
+
+struct vm_addr_rgn_table *hab_vm_addr_rgn_table_alloc(unsigned int nents)
+{
+	return gh_vm_addr_rgn_table_alloc(nents);
+}
+
+void hab_vm_addr_rgn_table_free(struct vm_addr_rgn_table *vm_ipa)
+{
+	if (!vm_ipa)
+		return;
+
+	gh_vm_addr_rgn_table_free(vm_ipa);
+}
 
 static void do_rx_send_work(struct vhost_work *work)
 {
@@ -214,8 +252,10 @@ static void tx_worker(struct vhost_hab_pchannel *vh_pchan)
 		if ((out_num > 0U) && (out_len > 0U)) {
 			iov_iter_init(&vh_pchan->out_iter, WRITE, vq->iov,
 						out_num, out_len);
+
 			copy_size = (ssize_t)copy_from_iter(&header, sizeof(header),
 						&vh_pchan->out_iter);
+
 			if (unlikely(copy_size != sizeof(header)))
 				pr_err("fault on copy_from_iter, out_len %lu, ret %lu\n",
 					out_len, copy_size);
@@ -613,6 +653,7 @@ static long vhost_hab_reset_owner(struct vhost_hab_dev *vh_dev)
 	vhost_hab_flush(vh_dev);
 	vhost_dev_stop(&vh_dev->dev);
 	vhost_dev_reset_owner(&vh_dev->dev, umem);
+
 done:
 	mutex_unlock(&vh_dev->dev.mutex);
 	return err;
@@ -1085,6 +1126,7 @@ int physical_channel_read(struct physical_channel *pchan,
 	}
 
 	copy_size = copy_from_iter(payload, read_size, &vh_pchan->out_iter);
+
 	if (unlikely(copy_size != read_size))
 		pr_err("fault on copy_from_iter, read_size %lu, ret %lu\n",
 			read_size, copy_size);
