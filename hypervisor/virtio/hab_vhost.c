@@ -1054,7 +1054,7 @@ static void rx_worker(struct vhost_hab_pchannel *vh_pchan)
 err_unlock:
 	mutex_unlock(&vq->mutex);
 	if (ret == -EAGAIN)
-		pr_warn("no avail buff on %s RX_VQ, wait...\n", vh_pchan->pchan->name);
+		pr_warn_ratelimited("no avail buff on %s RX_VQ, wait...\n", vh_pchan->pchan->name);
 }
 
 int physical_channel_send(struct physical_channel *pchan,

@@ -226,18 +226,18 @@ void hab_ctx_free(struct kref *ref)
 			HAB_HEADER_SET_SESSION_ID(header, HAB_SESSIONID_UNIMPORT);
 			ret = physical_channel_send(export->pchan, &header, &export->export_id);
 			if ((ret != 0) && (ret != -ENODEV))
-				pr_err("failed to send unimp msg %d, vcid %X, exp id %u\n",
+				pr_err_ratelimited("failed to send unimp msg %d, vcid %X, exp id %u\n",
 					ret, export->vcid_local, export->export_id);
 			else
 				pr_debug("unimp msg send ret %d, vcid %x, expid %u, pchan rmt closed %d\n",
 					ret, export->vcid_local, export->export_id,
 					export->pchan->otherend_closed);
 		} else if (ret == -EBUSY) {
-			pr_warn("exp id %u unmap fail on vcid %X, still in use. unimp msg deferred\n",
+			pr_warn_ratelimited("exp id %u unmap fail on vcid %X, still in use. unimp msg deferred\n",
 				export->export_id, export->vcid_local);
 			habmem_defer_unimp_sent(export);
 		} else
-			pr_err("unmap failed %d on vcid %X, exp id %u\n",
+			pr_err_ratelimited("unmap failed %d on vcid %X, exp id %u\n",
 				ret, export->vcid_local, export->export_id);
 
 		kfree(exp_super);
