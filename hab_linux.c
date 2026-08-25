@@ -151,6 +151,14 @@ static long hab_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 	switch (cmd) {
 	case IOCTL_HAB_VC_OPEN:
 		open_param = (struct hab_open *)data;
+		if (unlikely(!READ_ONCE(hab_driver.hab_init_success))) {
+			pr_info("opening on mmid %d when hab has not completed init\n",
+						open_param->mmid);
+			ret = wait_event_interruptible(hab_driver.hab_init_wq,
+					READ_ONCE(hab_driver.hab_init_success));
+			if (ret != 0)
+				break;
+		}
 		ret = hab_vchan_open(ctx, open_param->mmid,
 			&open_param->vcid,
 			(int32_t)open_param->timeout,
@@ -482,7 +490,8 @@ static int __init hab_init(void)
 		}
 	}
 	(void)hab_stat_init(&hab_driver);
-
+	WRITE_ONCE(hab_driver.hab_init_success, 1);
+	wake_up_interruptible_all(&hab_driver.hab_init_wq);
 	return result;
 
 err:

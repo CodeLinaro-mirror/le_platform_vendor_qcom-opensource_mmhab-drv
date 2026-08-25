@@ -68,6 +68,8 @@ struct hab_driver hab_driver = {
 	.imp_lock = __SPIN_LOCK_UNLOCKED(hab_driver.imp_lock),
 	.reclaim_list = LIST_HEAD_INIT(hab_driver.reclaim_list),
 	.reclaim_lock = __SPIN_LOCK_UNLOCKED(hab_driver.reclaim_lock),
+	.hab_init_success = 0,
+	.hab_init_wq = __WAIT_QUEUE_HEAD_INITIALIZER(hab_driver.hab_init_wq),
 };
 
 struct uhab_context *hab_ctx_alloc(int kernel)
