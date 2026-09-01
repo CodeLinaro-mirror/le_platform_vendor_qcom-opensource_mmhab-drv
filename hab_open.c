@@ -98,7 +98,8 @@ static int hab_open_request_find(struct uhab_context *ctx,
 	list_for_each_entry_safe(node, tmp, &dev->openq_list, node) {
 		request = (struct hab_open_request *)node;
 		if  ((request->type == listen->type ||
-			  request->type == HAB_PAYLOAD_TYPE_INIT_CANCEL) &&
+			  ((request->type == HAB_PAYLOAD_TYPE_INIT_CANCEL) &&
+			  (listen->type != HAB_PAYLOAD_TYPE_INIT))) &&
 			(request->xdata.sub_id == listen->xdata.sub_id) &&
 			(listen->xdata.open_id == 0 ||
 			request->xdata.open_id == listen->xdata.open_id) &&
