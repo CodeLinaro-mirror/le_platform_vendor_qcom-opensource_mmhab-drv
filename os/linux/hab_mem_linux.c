@@ -65,66 +65,60 @@ struct import_priv_info {
 
 static struct dma_buf_ops dma_buf_ops;
 
-static int hab_page_is_valid(unsigned long pfn)
-{
-	int ret = 0;
-#if 0
-	ret = page_is_ram(pfn);
-#else
-	ret = region_intersects(page_to_phys(pfn_to_page(pfn)), PAGE_SIZE,
-			IORESOURCE_MEM, IORES_DESC_NONE);
-	if (ret == REGION_INTERSECTS) {
-		ret = 1;
-	} else if (ret == REGION_MIXED) {
-		pr_warn( "pfn(0x%x) in mixed range\n", pfn);
-		ret = 0;
-	} else {
-		pr_err("pfn(0x%x) not in the range of device memory\n", pfn);
-		ret = 0;
-	}
-#endif
-        return ret;
-}
-
 static struct pages_list *pages_list_create(
 	struct export_desc *export,
 	uint32_t userflags)
 {
-	struct page **pages = NULL;
 	struct compressed_pfns *pfn_table =
 		(struct compressed_pfns *)export->payload;
 	struct pages_list *pglist = NULL;
 	unsigned long pfn;
 	long pfn2;
-	int i, j, k = 0, size;
+	int i = 0, j, k = 0, size;
 	unsigned long region_total_page = 0;
+	int ret;
+	int valid_pvm_ipa_region;
+	struct vm_addr_rgn_table *gvm_addr_rgn_tbl;
+	struct vm_addr_rgn_table *pvm_addr_rgn_tbl;
+	struct vm_addr_rgn *ipa_regions;
+	struct vm_addr_rgn *ipa_region;
+	struct page **pages = NULL;
+	unsigned long ipa_start;
+	bool output_in_pvm_addr_rgn_tbl = true;
 
 	if (pfn_table == NULL)
 		return ERR_PTR(-EINVAL);
 
 	pfn = pfn_table->first_pfn;
-	if (pfn_valid(pfn) == 0 || hab_page_is_valid(pfn) == 0) {
-		pr_err("imp sanity failed pfn %lx valid %d ram %d pchan %s\n",
-			pfn, pfn_valid(pfn),
-			page_is_ram(pfn), export->pchan->name);
-		return ERR_PTR(-EINVAL);
-	}
-
-	size = export->payload_count * (int)sizeof(struct page *);
-	pages = vmalloc((uint32_t)size);
-	if (pages == NULL)
-		return ERR_PTR(-ENOMEM);
 
 	pglist = kzalloc(sizeof(*pglist), GFP_KERNEL);
 	if (pglist == NULL) {
-		vfree(pages);
 		return ERR_PTR(-ENOMEM);
 	}
+
+	gvm_addr_rgn_tbl = hab_vm_addr_rgn_table_alloc((unsigned int)pfn_table->nregions);
+	if (IS_ERR_OR_NULL(gvm_addr_rgn_tbl)) {
+		ret = PTR_ERR(gvm_addr_rgn_tbl);
+		if (!ret)
+			ret = -ENOMEM;
+		goto err_gvm_addr_rgn_tbl;
+	}
+
+	pvm_addr_rgn_tbl = hab_vm_addr_rgn_table_alloc((unsigned int)export->payload_count);
+	if (IS_ERR_OR_NULL(pvm_addr_rgn_tbl)) {
+		ret = PTR_ERR(pvm_addr_rgn_tbl);
+		if (!ret)
+			ret = -ENOMEM;
+		goto err_pvm_addr_rgn_tbl;
+	}
+
+	ipa_regions = gvm_addr_rgn_tbl->regions;
 
 	for (i = 0; i < pfn_table->nregions; i++) {
 		if (pfn_table->region[i].size <= 0U) {
 			pr_err("pfn_table->region[%d].size %u is less than 1\n",
 				i, pfn_table->region[i].size);
+			ret = -EINVAL;
 			goto err_region_total_page;
 		}
 
@@ -132,13 +126,12 @@ static struct pages_list *pages_list_create(
 		if (region_total_page > (unsigned long)export->payload_count) {
 			pr_err("payload_count %d but region_total_page %lu\n",
 				export->payload_count, region_total_page);
+			ret = -EINVAL;
 			goto err_region_total_page;
 		}
 
-		for (j = 0; j < (int)pfn_table->region[i].size; j++) {
-			pages[k] = pfn_to_page(pfn+j);
-			k++;
-		}
+		ipa_regions[i].addr_start = PFN_PHYS(pfn);
+		ipa_regions[i].len = pfn_table->region[i].size * PAGE_SIZE;
 
 		pfn2 = (long)pfn + (long)pfn_table->region[i].size + (long)pfn_table->region[i].space;
 		pfn = (unsigned long)pfn2;
@@ -146,8 +139,58 @@ static struct pages_list *pages_list_create(
 	if (region_total_page != (unsigned long)export->payload_count) {
 		pr_err("payload_count %d and region_total_page %lu are not equal\n",
 			export->payload_count, region_total_page);
+		ret = -EINVAL;
 		goto err_region_total_page;
 	}
+
+	valid_pvm_ipa_region = hab_vm_addr_translate(gvm_addr_rgn_tbl, pvm_addr_rgn_tbl, export->pchan->vmid_remote,
+												&output_in_pvm_addr_rgn_tbl);
+	if (valid_pvm_ipa_region < 0 ) {
+		pr_err("ipa translate failed pchan %s export id %d osid %d valid_pvm_ipa_region %d payload count %d\n",
+			export->pchan->name, export->export_id, export->pchan->vmid_remote, valid_pvm_ipa_region,
+			export->payload_count);
+		ret = -EINVAL;
+		goto err_region_total_page;
+	} else
+		pr_debug("ipa translate success pchan %s export id %d osid %d valid_pvm_ipa_region %d, payload count %d\n",
+			export->pchan->name, export->export_id, export->pchan->vmid_remote, valid_pvm_ipa_region,
+			export->payload_count);
+
+	size = export->payload_count * (int)sizeof(struct page *);
+	pages = kvzalloc((uint32_t)size, GFP_KERNEL);
+	if (pages == NULL) {
+		ret = -ENOMEM;
+		goto err_region_total_page;
+	}
+
+	i = 0;
+	k = 0;
+	if (output_in_pvm_addr_rgn_tbl) {
+		for_each_addr_region(pvm_addr_rgn_tbl->regions, ipa_region, valid_pvm_ipa_region, i) {
+			size = ipa_region->len / PAGE_SIZE;
+			ipa_start = ipa_region->addr_start;
+
+			for (j = 0; j < size; j++) {
+				pages[k] = phys_to_page(ipa_start);
+				k++;
+				ipa_start += PAGE_SIZE;
+			}
+		}
+	} else {
+		for_each_addr_rgntlb_region(gvm_addr_rgn_tbl, ipa_region, i) {
+			size = ipa_region->len / PAGE_SIZE;
+			ipa_start = ipa_region->addr_start;
+
+			for (j = 0; j < size; j++) {
+				pages[k] = phys_to_page(ipa_start);
+				k++;
+				ipa_start += PAGE_SIZE;
+			}
+		}
+	}
+
+	hab_vm_addr_rgn_table_free(pvm_addr_rgn_tbl);
+	hab_vm_addr_rgn_table_free(gvm_addr_rgn_tbl);
 
 	pglist->pages = pages;
 	pglist->npages = (uint32_t)export->payload_count;
@@ -161,9 +204,12 @@ static struct pages_list *pages_list_create(
 	return pglist;
 
 err_region_total_page:
-	vfree(pages);
+	hab_vm_addr_rgn_table_free(pvm_addr_rgn_tbl);
+err_pvm_addr_rgn_tbl:
+	hab_vm_addr_rgn_table_free(gvm_addr_rgn_tbl);
+err_gvm_addr_rgn_tbl:
 	kfree(pglist);
-	return ERR_PTR(-EINVAL);
+	return ERR_PTR(ret);
 }
 
 static void pages_list_add(struct pages_list *pglist)
@@ -220,7 +266,7 @@ static void pages_list_destroy(struct kref *refcount)
 				pglist->npages, pglist->pchan->otherend_closed);
 	}
 
-	vfree(pglist->pages);
+	kvfree(pglist->pages);
 	kfree(pglist);
 }
 
