@@ -41,6 +41,10 @@
 #include <linux/version.h>
 #include <linux/devcoredump.h>
 #include <linux/freezer.h>
+#include <linux/interval_tree.h>
+#ifdef CONFIG_MSM_VHOST_HAB
+#include <linux/gunyah/gh_vm_addr_translation.h>
+#endif
 
 void hab_rb_init(struct rb_root *root);
 
@@ -69,6 +73,43 @@ static inline unsigned long long msm_timer_get_sclk_ticks(void)
 {
 	return 0;
 }
+#endif
+
+#ifdef CONFIG_MSM_VHOST_HAB
+#define spin_lock_bh spin_lock
+#define spin_unlock_bh spin_unlock
+
+#define write_lock_bh write_lock
+#define write_unlock_bh write_unlock
+
+#define read_lock_bh read_lock
+#define read_unlock_bh read_unlock
+#endif
+
+#ifdef CONFIG_MSM_VHOST_HAB
+int hab_vm_addr_translate(struct vm_addr_rgn_table *gvm_addr_rgn_tbl,
+                          struct vm_addr_rgn_table *pvm_addr_rgn_table,
+                          int hab_vmid, bool *output_in_pvm_addr_rgn_tbl);
+struct vm_addr_rgn_table *hab_vm_addr_rgn_table_alloc(unsigned int nents);
+void hab_vm_addr_rgn_table_free(struct vm_addr_rgn_table *vm_ipa);
+#else
+struct vm_addr_rgn_table {
+    char _unused;
+};
+
+static inline int hab_vm_addr_translate(struct vm_addr_rgn_table *gvm_addr_rgn_tbl,
+                                 struct vm_addr_rgn_table *pvm_addr_rgn_table,
+                                 int hab_vmid, bool *output_in_pvm_addr_rgn_tbl)
+{
+	return 0;
+}
+
+static inline struct vm_addr_rgn_table *hab_vm_addr_rgn_table_alloc(unsigned int nents)
+{
+    return NULL;
+}
+
+static inline void hab_vm_addr_rgn_table_free(struct vm_addr_rgn_table *vm_ipa) {};
 #endif
 
 #endif /*__HAB_OS_H*/
