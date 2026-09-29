@@ -58,6 +58,11 @@ struct exp_platform_data {
 	void *sg_table;
 };
 
+struct import_priv_info {
+	struct pages_list *pglist;
+	int vmid_local;
+};
+
 static struct dma_buf_ops dma_buf_ops;
 
 static int hab_page_is_valid(unsigned long pfn)
@@ -253,9 +258,11 @@ void habmem_defer_unimp_sent(struct export_desc *export)
 {
 	struct dma_buf *dmabuf;
 	struct pages_list *pglist;
+	struct import_priv_info *priv_info;
 
 	dmabuf = (struct dma_buf *)export->kva;
-	pglist = (struct pages_list *)dmabuf->priv;
+	priv_info = (struct import_priv_info *)dmabuf->priv;
+	pglist = priv_info->pglist;
 	pglist->unimp_timing = PGLIST_DESTROY;
 
 	/* decrease the file counter added by hab import from user space */
@@ -313,7 +320,7 @@ pro_end:
 }
 
 static struct dma_buf *habmem_get_dma_buf_from_uva(unsigned long address,
-		uint32_t page_count)
+		uint32_t page_count, struct physical_channel *pchan)
 {
 	struct page **pages = NULL;
 	long page_count_pinned, ret = 0;
@@ -321,6 +328,11 @@ static struct dma_buf *habmem_get_dma_buf_from_uva(unsigned long address,
 	struct dma_buf *dmabuf = NULL;
 	struct pages_list *pglist = NULL;
 	DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
+	struct import_priv_info *priv_info = NULL;
+
+	priv_info = kzalloc(sizeof(struct import_priv_info), GFP_KERNEL);
+	if (priv_info == NULL)
+		return ERR_PTR(-ENOMEM);
 
 	pages = vmalloc((page_count * sizeof(struct page *)));
 	if (pages == NULL) {
@@ -360,7 +372,12 @@ static struct dma_buf *habmem_get_dma_buf_from_uva(unsigned long address,
 	exp_info.ops = &dma_buf_ops;
 	exp_info.size = pglist->npages << PAGE_SHIFT;
 	exp_info.flags = O_RDWR;
-	exp_info.priv = pglist;
+
+	/* priv should include pglist & vmid_local */
+	priv_info->pglist = pglist;
+	priv_info->vmid_local = pchan->vmid_local;
+	exp_info.priv = priv_info;
+
 	dmabuf = dma_buf_export(&exp_info);
 	if (IS_ERR(dmabuf)) {
 		for (i = 0U; i < page_count; i++)
@@ -373,6 +390,7 @@ static struct dma_buf *habmem_get_dma_buf_from_uva(unsigned long address,
 	return dmabuf;
 
 err:
+	kfree(priv_info);
 	vfree(pages);
 	kfree(pglist);
 	return ERR_PTR(ret);
@@ -399,6 +417,7 @@ static int habmem_compress_pfns(
 	struct page *page = NULL, *pre_page = NULL;
 	unsigned long page_offset, space;
 	uint32_t spage_size = 0;
+	struct import_priv_info *priv_info = NULL;
 
 	if (IS_ERR_OR_NULL(dmabuf) || pfns == NULL || data_size == NULL)
 		return -EINVAL;
@@ -464,7 +483,8 @@ static int habmem_compress_pfns(
 		}
 		pfns->nregions = j+1;
 	} else {
-		pglist = dmabuf->priv;
+		priv_info = dmabuf->priv;
+		pglist = priv_info->pglist;
 		pages = pglist->pages;
 
 		pfns->first_pfn = page_to_pfn(pages[0]);
@@ -597,7 +617,7 @@ int habmem_hyp_grant_user(struct virtual_channel *vchan,
 	else if ((HABMM_EXPIMP_FLAGS_FD & flags) != 0U)
 		dmabuf = dma_buf_get((int)address);
 	else
-		dmabuf = habmem_get_dma_buf_from_uva(address, page_count);
+		dmabuf = habmem_get_dma_buf_from_uva(address, page_count, vchan->pchan);
 
 	if (IS_ERR_OR_NULL(dmabuf))
 		return -EINVAL;
@@ -635,6 +655,7 @@ int habmem_hyp_grant(struct virtual_channel *vchan,
 	struct dma_buf *dmabuf = NULL;
 	struct pages_list *pglist = NULL;
 	DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
+	struct import_priv_info *priv_info = NULL;
 
 	if ((HABMM_EXPIMP_FLAGS_DMABUF & flags) != 0U) {
 		dmabuf = (struct dma_buf *)address;
@@ -643,6 +664,12 @@ int habmem_hyp_grant(struct virtual_channel *vchan,
 	} else if ((HABMM_EXPIMP_FLAGS_FD & flags) != 0U)
 		dmabuf = dma_buf_get((int)address);
 	else { /*Input is kva;*/
+		priv_info = kzalloc(sizeof(struct import_priv_info), GFP_KERNEL);
+		if (!priv_info) {
+			ret = -ENOMEM;
+			goto err;
+		}
+
 		pages = vmalloc((page_count *
 				sizeof(struct page *)));
 		if (pages == NULL) {
@@ -675,7 +702,12 @@ int habmem_hyp_grant(struct virtual_channel *vchan,
 		exp_info.ops = &dma_buf_ops;
 		exp_info.size = pglist->npages << PAGE_SHIFT;
 		exp_info.flags = O_RDWR;
-		exp_info.priv = pglist;
+
+		/* priv should include pglist & vmid_local */
+		priv_info->pglist = pglist;
+		priv_info->vmid_local = vchan->pchan->vmid_local;
+		exp_info.priv = priv_info;
+
 		dmabuf = dma_buf_export(&exp_info);
 	}
 
@@ -695,6 +727,7 @@ int habmem_hyp_grant(struct virtual_channel *vchan,
 
 	return ret;
 err:
+	kfree(priv_info);
 	vfree(pages);
 	kfree(pglist);
 	return ret;
@@ -758,12 +791,14 @@ static struct sg_table *hab_mem_map_dma_buf(
 	enum dma_data_direction direction)
 {
 	struct dma_buf *dmabuf = attachment->dmabuf;
-	struct pages_list *pglist = dmabuf->priv;
+	struct import_priv_info *priv_info = dmabuf->priv;
+	struct pages_list *pglist = priv_info->pglist;
 	struct sg_table *sgt;
 	struct scatterlist *sg;
 	int i;
 	int ret = 0;
 	struct page **pages = pglist->pages;
+	int vmid_local = priv_info->vmid_local;
 
 	sgt = kzalloc(sizeof(struct sg_table), GFP_KERNEL);
 	if (sgt == NULL)
@@ -779,7 +814,9 @@ static struct sg_table *hab_mem_map_dma_buf(
 		sg_set_page(sg, pages[i], (uint32_t)PAGE_SIZE, 0);
 	}
 
-	if (strstr(dev_name(attachment->dev), VFIO_DEV_DT_NAME) != NULL) {
+	/* TODO: VFIO_DEV_DT_NAME check may not needed. Need more time to do test future */
+	if ((vmid_local == 0) ||
+		(strstr(dev_name(attachment->dev), VFIO_DEV_DT_NAME) != NULL)) {
 		pr_debug("detect %s for dma map %ld nent %ld pages\n",
 			dev_name(attachment->dev), sgt->nents, pglist->npages);
 		ret = dma_map_sg(attachment->dev, sgt->sgl, sgt->nents,
@@ -802,7 +839,12 @@ static void hab_mem_unmap_dma_buf(struct dma_buf_attachment *attachment,
 	struct sg_table *sgt,
 	enum dma_data_direction direction)
 {
-	if (strstr(dev_name(attachment->dev), VFIO_DEV_DT_NAME) != NULL) {
+	struct dma_buf *dmabuf = attachment->dmabuf;
+	struct import_priv_info *priv_info = dmabuf->priv;
+	int vmid_local = priv_info->vmid_local;
+
+	if ((vmid_local == 0) ||
+		(strstr(dev_name(attachment->dev), VFIO_DEV_DT_NAME) != NULL)) {
 		dma_unmap_sg(attachment->dev, sgt->sgl, sgt->nents, direction);
 		pr_debug("%s kiumd dma unmap done\n", dev_name(attachment->dev));
 	}
@@ -914,7 +956,8 @@ static const struct vm_operations_struct hab_buffer_vm_ops = {
 
 static int hab_mem_mmap(struct dma_buf *dmabuf, struct vm_area_struct *vma)
 {
-	struct pages_list *pglist = dmabuf->priv;
+	struct import_priv_info *priv_info = dmabuf->priv;
+	struct pages_list *pglist = priv_info->pglist;
 	unsigned long obj_size = pglist->npages << PAGE_SHIFT;
 
 	if (vma == NULL)
@@ -939,15 +982,18 @@ static int hab_mem_mmap(struct dma_buf *dmabuf, struct vm_area_struct *vma)
 
 static void hab_mem_dma_buf_release(struct dma_buf *dmabuf)
 {
-	struct pages_list *pglist = dmabuf->priv;
+	struct import_priv_info *priv_info = dmabuf->priv;
+	struct pages_list *pglist = priv_info->pglist;
 
 	pages_list_put(pglist);
+	kfree(priv_info);
 }
 
 static int hab_mem_dma_buf_vmap(struct dma_buf *dmabuf,
 				struct iosys_map *map)
 {
-	struct pages_list *pglist = dmabuf->priv;
+	struct import_priv_info *priv_info = dmabuf->priv;
+	struct pages_list *pglist = priv_info->pglist;
 
 	if (pglist->vmapping == NULL) {
 		pglist->vmapping = vmap(pglist->pages,
@@ -965,7 +1011,8 @@ static int hab_mem_dma_buf_vmap(struct dma_buf *dmabuf,
 static void hab_mem_dma_buf_vunmap(struct dma_buf *dmabuf,
 				   struct iosys_map *map)
 {
-	struct pages_list *pglist = dmabuf->priv;
+	struct import_priv_info *priv_info = dmabuf->priv;
+	struct pages_list *pglist = priv_info->pglist;
 
 	/* sanity check */
 	if (map->vaddr != pglist->vmapping)
@@ -996,10 +1043,17 @@ static struct dma_buf *habmem_import_to_dma_buf(
 	struct pages_list *pglist = NULL;
 	struct dma_buf *dmabuf = NULL;
 	DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
+	struct import_priv_info *priv_info = NULL;
+
+	priv_info = kzalloc(sizeof(struct import_priv_info), GFP_KERNEL);
+	if (!priv_info)
+		return ERR_PTR(-ENOMEM);
 
 	pglist = pages_list_create(export, userflags);
-	if (IS_ERR(pglist))
+	if (IS_ERR(pglist)) {
+		kfree(priv_info);
 		return (void *)pglist;
+	}
 
 	pages_list_add(pglist);
 	pglist->type = HAB_PAGE_LIST_IMPORT;
@@ -1007,12 +1061,17 @@ static struct dma_buf *habmem_import_to_dma_buf(
 	exp_info.ops = &dma_buf_ops;
 	exp_info.size = pglist->npages << PAGE_SHIFT;
 	exp_info.flags = O_RDWR;
-	exp_info.priv = pglist;
+
+	priv_info->pglist = pglist;
+	priv_info->vmid_local = pchan->vmid_local;
+	exp_info.priv = priv_info;
+
 	dmabuf = dma_buf_export(&exp_info);
 	if (IS_ERR(dmabuf)) {
 		pr_err("export to dmabuf failed, exp %d, pchan %s\n",
 			export->export_id, pchan->name);
 		pages_list_put(pglist);
+		kfree(priv_info);
 	}
 
 	return dmabuf;
