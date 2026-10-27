@@ -1371,11 +1371,11 @@ int habmm_imp_hyp_unmap(void *imp_ctx, struct export_desc *export, long fcnt_idl
 			cnt = file_count(buf->file);
 			if (cnt > fcnt_idle) {
 				ret = -EBUSY;
-				pr_err("the buf (exp id %u) still in use on %x, refcnt %ld, expect %d\n",
+				pr_err_ratelimited("the buf (exp id %u) still in use on %x, refcnt %ld, expect %d\n",
 					export->export_id, export->vcid_local, cnt, fcnt_idle);
 			} else if (cnt < fcnt_idle) {
 				ret = -ENOENT;
-				pr_err("the dmabuf (exp id %u) cnt is invalid %ld, expect %d, vcid %X\n",
+				pr_err_ratelimited("the dmabuf (exp id %u) cnt is invalid %ld, expect %d, vcid %X\n",
 					export->export_id, cnt, fcnt_idle, export->vcid_local);
 			} else {
 				export->kva = NULL;
