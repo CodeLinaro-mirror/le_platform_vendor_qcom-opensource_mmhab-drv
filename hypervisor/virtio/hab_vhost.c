@@ -20,6 +20,19 @@
 #include "vhost.h"
 #include "hab_trace_os.h"
 
+/* Keep the legacy u64 ioctl ABI with either vhost feature representation.
+ *
+ * Newer kernels define VHOST_FEATURES as bit numbers instead of a mask.
+ * Detect the conversion helper so this also works with backported headers.
+ */
+#ifdef VHOST_FEATURES_U64
+const int vhost_hab_bits[] = { VHOST_FEATURES };
+
+#define VHOST_HAB_FEATURES VHOST_FEATURES_U64(vhost_hab_bits, 0)
+#else
+#define VHOST_HAB_FEATURES VHOST_FEATURES
+#endif
+
 /* Max number of bytes transferred before requeueing the job.
  * Using this limit prevents one virtqueue from starving others.
  */
@@ -709,7 +722,7 @@ static long vhost_hab_ioctl(struct file *f, unsigned int ioctl,
 			r = -EFAULT;
 			break;
 		}
-		if ((features & ~VHOST_FEATURES) != 0U) {
+		if ((features & ~VHOST_HAB_FEATURES) != 0U) {
 			r = -EOPNOTSUPP;
 			break;
 		}
@@ -719,7 +732,7 @@ static long vhost_hab_ioctl(struct file *f, unsigned int ioctl,
 		pr_debug("skip VHOST_SET_CONFIG\n");
 		break;
 	case VHOST_GET_FEATURES:
-		features = VHOST_FEATURES;
+		features = VHOST_HAB_FEATURES;
 		if (copy_to_user(argp, &features, sizeof(features)) != 0U) {
 			r = -EFAULT;
 			break;
